@@ -1,10 +1,10 @@
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     """
-    สมองส่วนตัดสินใจ V3:
-    - ใช้ H4 + H1 Alignment (ต้องสอดคล้องกันทั้ง 2 Timeframe ถึงจะเปิดฝั่งนั้น ป้องกันการสวนเทรนด์ใหญ่)
-    - Agent 1 (VWAP-PB): เข้าจังหวะย่อตัวแตะ Session VWAP แล้วไปต่อตามเทรนด์ H1/H4
-    - Agent 2 (SWEEP): กวาดสภาพคล่องสุดขอบ VWAP Band + Swing 16 แท่งแล้วดึงกลับ
-    - Agent 3 (NY-PULSE): จับแรงส่งช่วงเปิดตลาดสหรัฐฯ (19:30 - 21:45 น.) เพื่อให้ออกไม้ครบทุกวันทำการ
+    สมองส่วนตัดสินใจ V4 (ปรับจูนจากผล Audit all_trades 14):
+    - ตัดสมอง SWEEP ที่ขาดทุน (-$767.38, WR 20%) ออกถาวร
+    - โฟกัสเฉพาะ 2 สมองที่ทำกำไรจริง:
+      1. Agent VWAP-PB (PF 2.23, WR 66.67%): ราคาย่อทดสอบ Session VWAP แล้วไปต่อตามเทรนด์ H1
+      2. Agent NY-PULSE (PF 1.25): จับแรงส่งช่วงตลาดลอนดอน-นิวยอร์ก (16:00 - 21:45 น.) เพื่อให้ออกไม้ครบทุกวันทำการ
     """
     t_mins = int(bar["thai_mins"])
     close_p = float(bar["close"])
@@ -12,34 +12,27 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     vwap_p = float(bar["vwap"])
     vwrsi_v = float(bar["vwrsi"])
 
+    # เทรดเฉพาะช่วง 09:00 - 22:00 น. เวลาไทย (ป้องกันออเดอร์ค้างข้ามคืนโดน Rollover)
     if not ((9 * 60) <= t_mins <= (22 * 60)):
         return None, ""
 
-    # เทรนด์ใหญ่ H4 และเทรนด์รอง H1 ต้องไปทางเดียวกัน (Dual-TF Alignment)
-    macro_bull = (float(bar["h4_close"]) >= float(bar["h4_ema"])) and (float(bar["h1_close"]) >= float(bar["h1_ema"]))
-    macro_bear = (float(bar["h4_close"]) < float(bar["h4_ema"])) and (float(bar["h1_close"]) < float(bar["h1_ema"]))
+    h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
+    h1_bear = float(bar["h1_close"]) < float(bar["h1_ema"])
 
-    # --- Agent 1: Institutional Liquidity Sweep (ต้องทะลุขอบ VWAP Band + Swing 16 แท่ง) ---
-    bull_sweep = (bar["low"] < bar["swing_low"]) and (bar["low"] <= bar["vwap_lower"]) and (close_p > bar["swing_low"]) and (close_p > open_p)
-    bear_sweep = (bar["high"] > bar["swing_high"]) and (bar["high"] >= bar["vwap_upper"]) and (close_p < bar["swing_high"]) and (close_p < open_p)
-
-    if macro_bull and bull_sweep and (vwrsi_v < 45) and (vwrsi_v > prev["vwrsi"]):
-        return "LONG", "SWEEP"
-    if macro_bear and bear_sweep and (vwrsi_v > 55) and (vwrsi_v < prev["vwrsi"]):
-        return "SHORT", "SWEEP"
-
-    # --- Agent 2: Session VWAP Pullback (เกิดบ่อยตลอดวันตั้งแต่ 11:00 น. เป็นต้นไป) ---
-    if t_mins >= (11 * 60):
-        if macro_bull and (prev["low"] <= prev["vwap"]) and (close_p > vwap_p) and (close_p > open_p) and (51 <= vwrsi_v <= 70):
+    # --- Agent 1: Session VWAP Pullback (พระเอก PF 2.23 — เปิดให้ทำงานตั้งแต่ 09:30 น. เพื่อจับรอบเช้าและบ่าย) ---
+    if t_mins >= (9 * 60 + 30):
+        # ขาขึ้น H1: ราคาย่อลงมาแตะ/ใต้เส้น VWAP แล้วดีดปิดแท่งเขียวยืนเหนือ VWAP พร้อม VWRSI ยกตัว
+        if h1_bull and (prev["low"] <= prev["vwap"]) and (close_p > vwap_p) and (close_p > open_p) and (50 <= vwrsi_v <= 72) and (vwrsi_v >= prev["vwrsi"]):
             return "LONG", "VWAP-PB"
-        if macro_bear and (prev["high"] >= prev["vwap"]) and (close_p < vwap_p) and (close_p < open_p) and (30 <= vwrsi_v <= 49):
+        # ขาลง H1: ราคาเด้งขึ้นไปแตะ/เหนือเส้น VWAP แล้วถูกตบปิดแท่งแดงใต้ VWAP พร้อม VWRSI หักลง
+        if h1_bear and (prev["high"] >= prev["vwap"]) and (close_p < vwap_p) and (close_p < open_p) and (28 <= vwrsi_v <= 50) and (vwrsi_v <= prev["vwrsi"]):
             return "SHORT", "VWAP-PB"
 
-    # --- Agent 3: NY Opening Momentum Pulse (19:30 - 21:45 น. รับประกันการออกไม้ประจำวัน) ---
-    if (19 * 60 + 30) <= t_mins <= (21 * 60 + 45):
-        if macro_bull and (close_p > vwap_p) and (vwrsi_v > 52) and (close_p > open_p):
+    # --- Agent 2: London-NY Momentum Pulse (16:30 - 21:45 น. เพื่อให้ออกไม้ครบทุกวันทำการ) ---
+    if (16 * 60 + 30) <= t_mins <= (21 * 60 + 45):
+        if h1_bull and (close_p > vwap_p) and (vwrsi_v > 52) and (close_p > open_p):
             return "LONG", "NY-PULSE"
-        if macro_bear and (close_p < vwap_p) and (vwrsi_v < 48) and (close_p < open_p):
+        if h1_bear and (close_p < vwap_p) and (vwrsi_v < 48) and (close_p < open_p):
             return "SHORT", "NY-PULSE"
 
     return None, ""

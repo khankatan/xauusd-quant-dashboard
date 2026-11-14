@@ -4,6 +4,14 @@ from engine.config import (
     HOUSE_MONEY_MODE, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, COMMISSION_PER_OZ
 )
 
+def get_agent_sl_tp_mult(agent_tag):
+    """ปรับระยะ SL/TP ตามรสชาติของตลาดที่สมองเลือกจากต่อมรับรส"""
+    if "SALTY" in agent_tag:
+        return 1.8, 2.2   # รสเค็ม (ไซด์เวย์): เก็บกำไรไวในกรอบ
+    if "SOUR" in agent_tag:
+        return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): เก็บระยะดีดกลับปานกลาง
+    return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (SWEET 2.2 / 3.5): รันเทรนด์ยาวคำโต
+
 class RiskGuard:
     def __init__(self, initial_capital=INITIAL_CAPITAL):
         self.initial_capital = initial_capital
@@ -82,8 +90,9 @@ class RiskGuard:
         return base
 
     def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False):
-        sl_dist = atr_val * SL_ATR_MULT
-        tp_dist = atr_val * TP_ATR_MULT
+        sl_mult, tp_mult = get_agent_sl_tp_mult(agent_tag)
+        sl_dist = atr_val * sl_mult
+        tp_dist = atr_val * tp_mult
         if sl_dist <= 0:
             return None
 
@@ -103,6 +112,7 @@ class RiskGuard:
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
                 "be_trigger": entry_price + (sl_dist * BE_TRIGGER_R),
+                "sl_dist": sl_dist,
                 "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }
         else:
@@ -112,13 +122,13 @@ class RiskGuard:
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,
                 "be_trigger": entry_price - (sl_dist * BE_TRIGGER_R),
+                "sl_dist": sl_dist,
                 "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }
 
     def record_close(self, net_pnl, exit_reason):
         self.equity += net_pnl
 
-        # ปิดข้ามคืนตอน 03:00 น. จากออเดอร์ของเมื่อวาน ห้ามไปล็อกวันใหม่
         if ("Rollover" in exit_reason or "Weekend-Close" in exit_reason) and self.trades_today == 0:
             if net_pnl < -20.0:
                 self.consecutive_losses += 1

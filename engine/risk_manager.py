@@ -1,7 +1,7 @@
 from engine.config import (
     INITIAL_CAPITAL, BASE_RISK_PCT, CONVICTION_RISK_PCT, THROTTLED_RISK_PCT,
     DAILY_TARGET_PCT, HARD_DAILY_DD_PCT, MAX_TRADES_PER_DAY, STOP_ON_BE_PLUS,
-    SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, COMMISSION_PER_OZ
+    HOUSE_MONEY_MODE, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, COMMISSION_PER_OZ
 )
 
 class RiskGuard:
@@ -10,11 +10,9 @@ class RiskGuard:
         self.equity = initial_capital
         self.lowest_equity = initial_capital
 
-        # Max Overall DD คำนวณจากฐานเงินต้น $100,000 ตามกฎ FTMO (ห้ามเกิน 10% หรือต่ำกว่า $90,000)
         self.max_overall_dd_pct = 0.0
         self.max_overall_dd_cash = 0.0
 
-        # Max Daily DD คำนวณจากยอดขาดทุนสูงสุดต่อวัน (ห้ามเกิน 3% ต่อวัน)
         self.max_daily_dd_pct = 0.0
         self.max_daily_dd_cash = 0.0
         self.worst_dd_date = "-"
@@ -26,6 +24,7 @@ class RiskGuard:
         self.today_loss_locked = False
         self.today_be_locked = False
         self.trades_today = 0
+        self.tp_wins_today = 0
         self.consecutive_losses = 0
 
     def on_new_bar(self, bar_date):
@@ -36,8 +35,8 @@ class RiskGuard:
             self.today_loss_locked = False
             self.today_be_locked = False
             self.trades_today = 0
+            self.tp_wins_today = 0
 
-        # 1. ตรวจสอบ Overall Drawdown จากฐานเงินต้น $100,000
         self.lowest_equity = min(self.lowest_equity, self.equity)
         dd_from_initial_cash = max(0.0, self.initial_capital - self.equity)
         dd_from_initial_pct = (dd_from_initial_cash / self.initial_capital) * 100.0
@@ -45,7 +44,6 @@ class RiskGuard:
             self.max_overall_dd_pct = dd_from_initial_pct
             self.max_overall_dd_cash = dd_from_initial_cash
 
-        # 2. ตรวจสอบ Daily Drawdown ภายในวันปัจจุบัน
         daily_pnl_cash = self.equity - self.daily_start_eq
         daily_pnl_pct = (daily_pnl_cash / self.daily_start_eq) * 100.0
 
@@ -65,14 +63,25 @@ class RiskGuard:
             self.today_loss_locked = True
 
     def can_trade(self):
-        if self.today_target_logged or self.today_loss_locked or self.today_be_locked:
+        if self.today_loss_locked or self.today_be_locked:
             return False
-        return self.trades_today < MAX_TRADES_PER_DAY
+        if self.trades_today == 0:
+            return True
+        # อนุญาตให้ออกไม้ต่อยอด (ไม้ที่ 2 และ 3) เฉพาะวันที่ไม้ก่อนหน้าทั้งหมดปิด TP เท่านั้น (ไม่นับ BE+)
+        if HOUSE_MONEY_MODE and (self.tp_wins_today == self.trades_today) and (self.trades_today < MAX_TRADES_PER_DAY):
+            return True
+        return False
 
     def get_active_risk_pct(self, is_macro_conv=False):
         if self.consecutive_losses >= 2:
-            return THROTTLED_RISK_PCT
-        return CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
+            base = THROTTLED_RISK_PCT
+        else:
+            base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
+
+        # ไม้ที่ 2 และไม้ที่ 3 ลดความเสี่ยงลงครึ่งหนึ่งจากไม้แรก และใช้ขนาดเท่ากัน (50% ของฐาน)
+        if self.trades_today >= 1:
+            return round(base * 0.5, 4)
+        return base
 
     def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False):
         sl_dist = atr_val * SL_ATR_MULT
@@ -85,11 +94,13 @@ class RiskGuard:
         oz = risk_cash / sl_dist
         comm = oz * COMMISSION_PER_OZ * 2
         self.trades_today += 1
+
         conv_tag = "+OI" if is_macro_conv else ""
+        step_tag = f"-H{self.trades_today}" if self.trades_today > 1 else ""
 
         if direction == "BUY":
             return {
-                "type": "BUY", "agent": agent_tag, "conv": conv_tag, "risk_pct": risk_pct,
+                "type": "BUY", "agent": agent_tag, "conv": f"{conv_tag}{step_tag}", "risk_pct": risk_pct,
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
@@ -98,7 +109,7 @@ class RiskGuard:
             }
         else:
             return {
-                "type": "SELL", "agent": agent_tag, "conv": conv_tag, "risk_pct": risk_pct,
+                "type": "SELL", "agent": agent_tag, "conv": f"{conv_tag}{step_tag}", "risk_pct": risk_pct,
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,
@@ -108,9 +119,18 @@ class RiskGuard:
 
     def record_close(self, net_pnl, exit_reason):
         self.equity += net_pnl
-        if STOP_ON_BE_PLUS and "BE+" in exit_reason:
+
+        # 1. หากชน BE+ ถือว่ากราฟย้อนทาง -> ล็อกหยุดเทรดทันที ไม่ออกไม้ต่อ
+        if "BE+" in exit_reason:
             self.today_be_locked = True
-        if net_pnl < -20.0:
-            self.consecutive_losses += 1
-        elif net_pnl > 20.0:
+            return
+
+        # 2. อนุญาตให้ออกไม้ต่อเฉพาะกรณีที่ปิด TP เท่านั้น
+        if "-TP" in exit_reason and net_pnl > 0:
+            self.tp_wins_today += 1
             self.consecutive_losses = 0
+        else:
+            # กรณีโดน SL, Rollover หรือ Weekend-Close -> ล็อกหยุดเทรดของวันนั้นทันที
+            self.today_loss_locked = True
+            if net_pnl < -20.0:
+                self.consecutive_losses += 1

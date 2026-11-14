@@ -3,72 +3,62 @@ import pandas as pd
 from engine.config import ATR_LEN, VWRSI_LEN, H1_EMA_LEN
 
 def compute_all_features(df):
-    df = df.copy()
-    df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
-    df = df.sort_values("datetime").reset_index(drop=True)
+    d = df.copy()
+    d["thai_dt"] = d["datetime"] + pd.Timedelta(hours=7)
+    d["thai_date"] = d["thai_dt"].dt.date
+    d["thai_hour"] = d["thai_dt"].dt.hour
+    d["thai_minute"] = d["thai_dt"].dt.minute
+    d["thai_mins"] = d["thai_hour"] * 60 + d["thai_minute"]
 
-    thai_dt = df["datetime"] + pd.Timedelta(hours=7)
-    df["thai_date"] = thai_dt.dt.date
-    df["thai_hour"] = thai_dt.dt.hour
-    df["thai_minute"] = thai_dt.dt.minute
-    df["thai_mins"] = df["thai_hour"] * 60 + df["thai_minute"]
+    # 1. True Range & ATR (14) + Dynamic Relative ATR Ratio (เทียบกับฐาน 100 แท่งล่าสุด)
+    prev_c = d["close"].shift(1)
+    tr = pd.concat([
+        (d["high"] - d["low"]).abs(),
+        (d["high"] - prev_c).abs(),
+        (d["low"] - prev_c).abs()
+    ], axis=1).max(axis=1)
+    d["atr"] = tr.ewm(alpha=1 / ATR_LEN, adjust=False).mean()
+    d["atr_base"] = d["atr"].rolling(100, min_periods=20).mean()
+    d["atr_ratio"] = (d["atr"] / d["atr_base"]).fillna(1.0)
 
-    # 1. Multi-Timeframe H1 & H4 Trend (ใช้ merge_asof ป้องกัน MergeError และ Zero Look-Ahead)
-    df_indexed = df.set_index("datetime")
+    # 2. Exact Session VWAP (รีเซ็ตทุก 08:00 น. เวลาไทย)
+    tp = (d["high"] + d["low"] + d["close"]) / 3.0
+    pseudo_vol = (tr / d["atr"]).fillna(1.0).clip(0.3, 4.0)
+    d["session_id"] = (d["thai_dt"] - pd.Timedelta(hours=8)).dt.date
+    d["pv"] = tp * pseudo_vol
+    d["pvol"] = pseudo_vol
+    d["cum_pv"] = d.groupby("session_id")["pv"].cumsum()
+    d["cum_vol"] = d.groupby("session_id")["pvol"].cumsum()
+    d["vwap"] = d["cum_pv"] / d["cum_vol"]
 
-    df_h1 = df_indexed.resample("1h").agg({
-        "open": "first", "high": "max", "low": "min", "close": "last"
-    }).dropna().reset_index()
-    df_h1["h1_ema"] = df_h1["close"].ewm(span=H1_EMA_LEN, adjust=False).mean()
-    # เลื่อนเวลาไป 1 ชั่วโมงเต็ม เพื่อให้ M15 อ่านเฉพาะแท่ง H1 ที่ปิดสมบูรณ์แล้วเท่านั้น
-    df_h1["valid_from"] = df_h1["datetime"] + pd.Timedelta(hours=1)
-    df_h1 = df_h1[["valid_from", "close", "h1_ema"]].rename(columns={"close": "h1_close"}).sort_values("valid_from")
+    # 3. Volume-Weighted RSI (14)
+    delta = d["close"].diff()
+    up = np.where(delta > 0, delta * pseudo_vol, 0.0)
+    down = np.where(delta < 0, (-delta) * pseudo_vol, 0.0)
+    roll_up = pd.Series(up, index=d.index).ewm(alpha=1 / VWRSI_LEN, adjust=False).mean()
+    roll_down = pd.Series(down, index=d.index).ewm(alpha=1 / VWRSI_LEN, adjust=False).mean()
+    rs = roll_up / (roll_down + 1e-12)
+    d["vwrsi"] = 100.0 - (100.0 / (1.0 + rs))
 
-    df_h4 = df_indexed.resample("4h").agg({
-        "open": "first", "high": "max", "low": "min", "close": "last"
-    }).dropna().reset_index()
-    df_h4["h4_ema"] = df_h4["close"].ewm(span=21, adjust=False).mean()
-    df_h4["valid_from"] = df_h4["datetime"] + pd.Timedelta(hours=4)
-    df_h4 = df_h4[["valid_from", "close", "h4_ema"]].rename(columns={"close": "h4_close"}).sort_values("valid_from")
+    # 4. Macro & Fast Z-Score
+    d["macro_mean"] = d["close"].rolling(96).mean()
+    d["macro_std"] = d["close"].rolling(96).std()
+    d["macro_z"] = (d["close"] - d["macro_mean"]) / (d["macro_std"] + 1e-12)
 
-    df = pd.merge_asof(df, df_h1, left_on="datetime", right_on="valid_from", direction="backward").drop(columns=["valid_from"])
-    df = pd.merge_asof(df, df_h4, left_on="datetime", right_on="valid_from", direction="backward").drop(columns=["valid_from"])
+    d["fast_mean"] = d["close"].rolling(24).mean()
+    d["fast_std"] = d["close"].rolling(24).std()
+    d["fast_z"] = (d["close"] - d["fast_mean"]) / (d["fast_std"] + 1e-12)
 
-    # 2. Synthetic Volume & Session VWAP รายวัน
-    df["tick_vol"] = (df["high"] - df["low"]).replace(0, 0.01)
-    df["typical_price"] = (df["high"] + df["low"] + df["close"]) / 3.0
-    df["pv"] = df["typical_price"] * df["tick_vol"]
-    df["cum_pv"] = df.groupby("thai_date")["pv"].cumsum()
-    df["cum_vol"] = df.groupby("thai_date")["tick_vol"].cumsum()
-    df["vwap"] = df["cum_pv"] / df["cum_vol"]
+    # 5. Multi-Timeframe H1 & H4 Trend Alignment
+    d_idx = d.set_index("datetime")
+    h1 = d_idx["close"].resample("1h").last().dropna()
+    h1_ema = h1.ewm(span=H1_EMA_LEN, adjust=False).mean()
+    h1_df = pd.DataFrame({"h1_close": h1, "h1_ema": h1_ema}).shift(1)
 
-    df["vwap_diff_sq"] = ((df["typical_price"] - df["vwap"]) ** 2) * df["tick_vol"]
-    df["vwap_std"] = np.sqrt(df.groupby("thai_date")["vwap_diff_sq"].cumsum() / df["cum_vol"])
-    df["vwap_upper"] = df["vwap"] + (1.25 * df["vwap_std"])
-    df["vwap_lower"] = df["vwap"] - (1.25 * df["vwap_std"])
+    h4 = d_idx["close"].resample("4h").last().dropna()
+    h4_ema = h4.ewm(span=21, adjust=False).mean()
+    h4_df = pd.DataFrame({"h4_close": h4, "h4_ema": h4_ema}).shift(1)
 
-    # 3. Volume-Weighted RSI (VWRSI 14)
-    delta = df["close"].diff()
-    up_vol = delta.clip(lower=0) * df["tick_vol"]
-    down_vol = (-delta.clip(upper=0)) * df["tick_vol"]
-    avg_up = up_vol.ewm(alpha=1/VWRSI_LEN, adjust=False).mean()
-    avg_down = down_vol.ewm(alpha=1/VWRSI_LEN, adjust=False).mean()
-    rs = avg_up / avg_down.replace(0, np.nan)
-    df["vwrsi"] = 100 - (100 / (1 + rs))
-
-    # 4. กรอบ Swing 16 แท่ง (4 ชม.)
-    df["swing_high"] = df["high"].rolling(16).max().shift(1)
-    df["swing_low"] = df["low"].rolling(16).min().shift(1)
-
-    # 5. ATR (14) และ Z-Score สำหรับ Dashboard
-    tr = pd.concat([df["high"] - df["low"], (df["high"] - df["close"].shift(1)).abs(), (df["low"] - df["close"].shift(1)).abs()], axis=1).max(axis=1)
-    df["atr"] = tr.rolling(ATR_LEN).mean()
-
-    m100 = df["close"].rolling(100).mean()
-    s100 = df["close"].rolling(100).std()
-    df["macro_z"] = (df["close"] - m100) / s100.replace(0, np.nan)
-    m14 = df["close"].rolling(14).mean()
-    s14 = df["close"].rolling(14).std()
-    df["fast_z"] = (df["close"] - m14) / s14.replace(0, np.nan)
-
-    return df
+    merged = pd.merge_asof(d.sort_values("datetime"), h1_df.reset_index().sort_values("datetime"), on="datetime", direction="backward")
+    merged = pd.merge_asof(merged.sort_values("datetime"), h4_df.reset_index().sort_values("datetime"), on="datetime", direction="backward")
+    return merged.reset_index(drop=True)

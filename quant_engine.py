@@ -83,9 +83,6 @@ def run_modular_engine():
 
         guard.on_new_bar(bar_date)
 
-        # ตรวจสอบเงื่อนไขปิดออเดอร์ตามเวลา:
-        # 1) คืนวันศุกร์: บังคับปิดก่อนตลาดปิดสัปดาห์ภายใน 03:00 น. เช้าเสาร์ไทย (20:00 UTC ศุกร์) -> ป้าย Weekend-Close
-        # 2) จันทร์ - พฤหัสบดี: ปิดก่อนช่วง Rollover & สเปรดถ่างที่ 03:00 น. เวลาไทย (20:00 UTC) -> ป้าย Rollover
         friday_close_now = must_close_for_weekend(dt)
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
 
@@ -93,7 +90,7 @@ def run_modular_engine():
             exit_price = None
             exit_reason = None
 
-            if pos["type"] == "LONG":
+            if pos["type"] == "BUY":
                 if not pos["is_be"] and bar["high"] >= pos["be_trigger"]:
                     pos["sl"] = pos["entry"] + (pos["atr"] * 0.08)
                     pos["is_be"] = True
@@ -117,13 +114,13 @@ def run_modular_engine():
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
                         "entry_time": pos["entry_time"], "exit_time": now_ts,
-                        "entry_hour_utc": pos["entry_hour"], "type": "LONG",
+                        "entry_hour_utc": pos["entry_hour"], "type": "BUY",
                         "entry": round(pos["entry"], 2), "exit": round(exit_price, 2),
                         "pnl": round(net_pnl, 2), "reason": exit_reason
                     })
                     pos = None
 
-            elif pos["type"] == "SHORT":
+            elif pos["type"] == "SELL":
                 if not pos["is_be"] and bar["low"] <= pos["be_trigger"]:
                     pos["sl"] = pos["entry"] - (pos["atr"] * 0.08)
                     pos["is_be"] = True
@@ -147,7 +144,7 @@ def run_modular_engine():
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
                         "entry_time": pos["entry_time"], "exit_time": now_ts,
-                        "entry_hour_utc": pos["entry_hour"], "type": "SHORT",
+                        "entry_hour_utc": pos["entry_hour"], "type": "SELL",
                         "entry": round(pos["entry"], 2), "exit": round(exit_price, 2),
                         "pnl": round(net_pnl, 2), "reason": exit_reason
                     })
@@ -156,7 +153,7 @@ def run_modular_engine():
         if pos is None and (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars)
             if sig_dir is not None:
-                is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "LONG" else bool(bar["macro_bear_conv"])
+                is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
                 pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv)
 
         if i % 4 == 0:
@@ -171,8 +168,8 @@ def run_modular_engine():
     total_trades = len(closed_trades)
     winners = [t for t in closed_trades if t["pnl"] > 0]
     losers = [t for t in closed_trades if t["pnl"] <= 0]
-    longs = [t for t in closed_trades if t["type"] == "LONG"]
-    shorts = [t for t in closed_trades if t["type"] == "SHORT"]
+    buys = [t for t in closed_trades if t["type"] == "BUY"]
+    sells = [t for t in closed_trades if t["type"] == "SELL"]
 
     def agent_stats(keywords):
         sub = [t for t in closed_trades if any(k in t["reason"] for k in keywords)]
@@ -207,7 +204,7 @@ def run_modular_engine():
     curr_dt = curr["datetime"].to_pydatetime()
     sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars)
     sig_type = sig_now if (sig_now and not must_close_for_weekend(curr_dt)) else "WAIT"
-    is_conv_now = (bool(curr["macro_bull_conv"]) if sig_type == "LONG" else bool(curr["macro_bear_conv"])) if sig_type != "WAIT" else False
+    is_conv_now = (bool(curr["macro_bull_conv"]) if sig_type == "BUY" else bool(curr["macro_bear_conv"])) if sig_type != "WAIT" else False
 
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
@@ -231,7 +228,7 @@ def run_modular_engine():
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_source": f"{source_name} + COMEX GC=F OI & DXY",
+        "data_source": f"{source_name} + COMEX GC=F OI & DXY (CFD Mode)",
         "history_range": f"{df.iloc[0]['datetime'].strftime('%Y-%m-%d')} ถึง {df.iloc[-1]['datetime'].strftime('%Y-%m-%d')} ({total_mon_fri_days} วันทำการ)",
         "current_price": round(float(df.iloc[-1]["close"]), 2),
         "equity": round(guard.equity, 2),
@@ -245,9 +242,9 @@ def run_modular_engine():
             "agent": f"{agent_now}{'+OI' if is_conv_now else ''}" if sig_type != "WAIT" else "SCANNING",
             "risk_pct": active_risk_now,
             "entry": round(entry_now, 2) if sig_type != "WAIT" else None,
-            "sl": round(entry_now - sl_d if sig_type == "LONG" else entry_now + sl_d, 2) if sig_type != "WAIT" else None,
-            "tp": round(entry_now + tp_d if sig_type == "LONG" else entry_now - tp_d, 2) if sig_type != "WAIT" else None,
-            "be_trigger": round(entry_now + sl_d * BE_TRIGGER_R if sig_type == "LONG" else entry_now - sl_d * BE_TRIGGER_R, 2) if sig_type != "WAIT" else None,
+            "sl": round(entry_now - sl_d if sig_type == "BUY" else entry_now + sl_d, 2) if sig_type != "WAIT" else None,
+            "tp": round(entry_now + tp_d if sig_type == "BUY" else entry_now - tp_d, 2) if sig_type != "WAIT" else None,
+            "be_trigger": round(entry_now + sl_d * BE_TRIGGER_R if sig_type == "BUY" else entry_now - sl_d * BE_TRIGGER_R, 2) if sig_type != "WAIT" else None,
             "lot_size": lot_now
         },
         "backtest": {
@@ -264,8 +261,8 @@ def run_modular_engine():
             "win_rate": round(win_rate, 2),
             "profit_factor": round(profit_factor, 2),
             "days_hit_target": guard.days_hit_target,
-            "long_pnl": round(sum(t["pnl"] for t in longs), 2),
-            "short_pnl": round(sum(t["pnl"] for t in shorts), 2),
+            "buy_pnl": round(sum(t["pnl"] for t in buys), 2),
+            "sell_pnl": round(sum(t["pnl"] for t in sells), 2),
             "agents": agents_breakdown,
             "recent_trades": closed_trades[-20:][::-1],
             "equity_curve": equity_curve
@@ -276,7 +273,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V7.2 Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
+    print(f"V7.3 CFD Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

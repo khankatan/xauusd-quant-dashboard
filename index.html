@@ -3,47 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>XAUUSD Quant Dashboard (GitHub Free Engine)</title>
+  <title>XAUUSD Quant Live & Backtest Dashboard</title>
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 16px; }
-    .container { max-width: 1100px; margin: 0 auto; }
+    .container { max-width: 1150px; margin: 0 auto; }
     .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .section-title { font-size: 14px; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 0 8px 0; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 14px; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; }
-    .card h4 { margin: 0 0 6px 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; }
+    .card h4 { margin: 0 0 6px 0; font-size: 11px; color: #94a3b8; text-transform: uppercase; }
     .card .val { font-size: 20px; font-weight: 700; }
-    .badge-long { color: #10b981; }
-    .badge-short { color: #ef4444; }
-    .badge-wait { color: #f59e0b; }
-    #chart { width: 100%; height: 460px; border-radius: 10px; overflow: hidden; border: 1px solid #334155; }
+    .pos { color: #10b981; } .neg { color: #ef4444; } .wait { color: #f59e0b; }
+    .charts-row { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 16px; }
+    @media(min-width: 900px) { .charts-row { grid-template-columns: 1.4fr 1fr; } }
+    .chart-box { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 10px; }
+    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 10px; overflow: hidden; font-size: 13px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #334155; }
+    th { background: #0f172a; color: #94a3b8; font-size: 11px; text-transform: uppercase; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <div>
-        <h2 style="margin:0;">XAUUSD Quant Signal Dashboard (M15)</h2>
-        <small id="meta" style="color:#94a3b8;">กำลังโหลดข้อมูลจาก GitHub...</small>
+        <h2 style="margin:0;">XAUUSD Quant Engine (GitHub Free Backtest & Live)</h2>
+        <small id="meta" style="color:#94a3b8;">กำลังโหลดข้อมูล...</small>
       </div>
-      <button onclick="loadDashboard()" style="background:#2563eb;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;">รีเฟรชข้อมูล</button>
+      <button onclick="loadDashboard()" style="background:#2563eb;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;">รีเฟรชข้อมูล</button>
     </div>
 
+    <div class="section-title">1. สัญญาณปัจจุบัน (Live M15 Signal — เสี่ยง 0.25% / ไม้)</div>
     <div class="grid">
       <div class="card">
-        <h4>สัญญาณล่าสุด (Signal)</h4>
+        <h4>สถานะสัญญาณ (Signal)</h4>
         <div id="sig-type" class="val">-</div>
         <small id="sig-lot" style="color:#94a3b8;">Lot (พอร์ต 100k): -</small>
       </div>
       <div class="card">
-        <h4>จุดเข้า / จุดเลื่อนหน้าทุน (BE+)</h4>
+        <h4>จุดเข้า & จุดเลื่อนหน้าทุน (BE+)</h4>
         <div id="sig-entry" class="val">-</div>
-        <small id="sig-be" style="color:#fbbf24;">BE Trigger: -</small>
+        <small id="sig-be" style="color:#fbbf24;">BE+ Trigger: -</small>
       </div>
       <div class="card">
-        <h4>Stop Loss / Take Profit (1:2.25)</h4>
+        <h4>Stop Loss / Take Profit</h4>
         <div id="sig-sl-tp" class="val" style="font-size:16px;">-</div>
-        <small style="color:#94a3b8;">Risk: 0.25% | Daily Lock: +0.30%</small>
+        <small style="color:#94a3b8;">R:R 1:2.25 | Daily Lock +0.30%</small>
       </div>
       <div class="card">
         <h4>สภาวะตลาด (Macro Z-Score)</h4>
@@ -52,47 +57,117 @@
       </div>
     </div>
 
-    <div id="chart"></div>
+    <div class="section-title">2. ผลทดสอบย้อนหลังบน GitHub (Backtest Performance — รวมค่าคอมมิชชันจริง)</div>
+    <div class="grid">
+      <div class="card">
+        <h4>กำไรสุทธิ (Net PnL)</h4>
+        <div id="bt-pnl" class="val">-</div>
+        <small id="bt-range" style="color:#94a3b8;">ช่วงข้อมูล: -</small>
+      </div>
+      <div class="card">
+        <h4>Win Rate / จำนวนไม้ทั้งหมด</h4>
+        <div id="bt-wr" class="val">-</div>
+        <small id="bt-pf" style="color:#94a3b8;">Profit Factor: -</small>
+      </div>
+      <div class="card">
+        <h4>Max Drawdown สูงสุด</h4>
+        <div id="bt-dd" class="val">-</div>
+        <small style="color:#94a3b8;">เพดานกฎ FTMO: 5% รายวัน / 10% รวม</small>
+      </div>
+      <div class="card">
+        <h4>จำนวนวันที่ทำกำไรถึง +0.30%</h4>
+        <div id="bt-days" class="val pos">-</div>
+        <small style="color:#94a3b8;">ล็อกเป้าหยุดเทรดรายวันอัตโนมัติ</small>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-box">
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">กราฟราคา XAUUSD M15 (300 แท่งล่าสุด + เส้นมาร์ค)</div>
+        <div id="price-chart" style="height:360px;"></div>
+      </div>
+      <div class="chart-box">
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">กราฟการเติบโตของพอร์ต (Backtest Equity Curve)</div>
+        <div id="eq-chart" style="height:360px;"></div>
+      </div>
+    </div>
+
+    <div class="section-title">3. ประวัติการจำลองเทรดย้อนหลัง 15 ไม้ล่าสุด</div>
+    <table>
+      <thead>
+        <tr><th>เวลาปิดไม้ (UTC)</th><th>ฝั่ง</th><th>ราคาเข้า</th><th>ราคาออก</th><th>สาเหตุออก</th><th>กำไร/ขาดทุน ($)</th></tr>
+      </thead>
+      <tbody id="trade-rows"></tbody>
+    </table>
   </div>
 
   <script>
-    const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    const priceChart = LightweightCharts.createChart(document.getElementById('price-chart'), {
       layout: { background: { color: '#1e293b' }, textColor: '#cbd5e1' },
       grid: { vertLines: { color: '#334155' }, horzLines: { color: '#334155' } },
-      timeScale: { timeVisible: true, secondsVisible: false }
+      timeScale: { timeVisible: true }
     });
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = priceChart.addCandlestickSeries({
       upColor: '#10b981', downColor: '#ef4444', borderVisible: false, wickUpColor: '#10b981', wickDownColor: '#ef4444'
+    });
+
+    const eqChart = LightweightCharts.createChart(document.getElementById('eq-chart'), {
+      layout: { background: { color: '#1e293b' }, textColor: '#cbd5e1' },
+      grid: { vertLines: { color: '#334155' }, horzLines: { color: '#334155' } },
+      timeScale: { timeVisible: true }
+    });
+    const eqSeries = eqChart.addAreaSeries({
+      lineColor: '#10b981', topColor: 'rgba(16, 185, 129, 0.35)', bottomColor: 'rgba(16, 185, 129, 0.0)'
     });
 
     async function loadDashboard() {
       const res = await fetch('./data/state.json?t=' + Date.now());
       const data = await res.json();
 
-      document.getElementById('meta').innerText = `อัปเดตล่าสุด: ${data.updated_utc} | แหล่งข้อมูล: ${data.data_source}`;
+      document.getElementById('meta').innerText = `อัปเดต: ${data.updated_utc} | แหล่งข้อมูล: ${data.data_source}`;
       
       const sigEl = document.getElementById('sig-type');
       sigEl.innerText = data.signal.type;
-      sigEl.className = 'val ' + (data.signal.type === 'LONG' ? 'badge-long' : data.signal.type === 'SHORT' ? 'badge-short' : 'badge-wait');
-
-      document.getElementById('sig-lot').innerText = `แนะนำ Lot (พอร์ต 100k): ${data.signal.lot_size_100k} Lot`;
+      sigEl.className = 'val ' + (data.signal.type === 'LONG' ? 'pos' : data.signal.type === 'SHORT' ? 'neg' : 'wait');
+      document.getElementById('sig-lot').innerText = `Lot แนะนำ (พอร์ต 100k): ${data.signal.lot_size} Lot`;
       document.getElementById('sig-entry').innerText = data.signal.entry ? `$${data.signal.entry}` : `ราคาปัจจุบัน $${data.current_price}`;
       document.getElementById('sig-be').innerText = data.signal.be_trigger ? `เลื่อน SL หน้าทุนที่: $${data.signal.be_trigger}` : 'รอจังหวะ Pullback';
-      document.getElementById('sig-sl-tp').innerHTML = data.signal.sl 
-        ? `<span style="color:#ef4444;">SL: $${data.signal.sl}</span> | <span style="color:#10b981;">TP: $${data.signal.tp}</span>` : 'ไม่มีออเดอร์เปิดใหม่';
-
+      document.getElementById('sig-sl-tp').innerHTML = data.signal.sl ? `<span class="neg">SL: $${data.signal.sl}</span> | <span class="pos">TP: $${data.signal.tp}</span>` : 'รอสัญญาณเข้า';
       document.getElementById('regime').innerText = data.regime;
       document.getElementById('z-vals').innerText = `Macro Z: ${data.macro_z} | Fast Z: ${data.fast_z} | ATR: $${data.atr}`;
 
-      candleSeries.setData(data.candles);
+      // Backtest Stats
+      const bt = data.backtest;
+      const pnlEl = document.getElementById('bt-pnl');
+      pnlEl.innerText = `${bt.net_pnl >= 0 ? '+' : ''}$${bt.net_pnl.toLocaleString()} (${bt.net_pnl_pct}%)`;
+      pnlEl.className = 'val ' + (bt.net_pnl >= 0 ? 'pos' : 'neg');
+      document.getElementById('bt-range').innerText = data.history_range;
+      document.getElementById('bt-wr').innerText = `${bt.win_rate}% (${bt.total_trades} ไม้)`;
+      document.getElementById('bt-pf').innerText = `Profit Factor: ${bt.profit_factor}`;
+      document.getElementById('bt-dd').innerText = `${bt.max_dd_pct}%`;
+      document.getElementById('bt-days').innerText = `${bt.days_hit_target} วัน`;
 
-      // ลากเส้นมาร์ค Entry, SL, TP บนกราฟเมื่อมีสัญญาณ
+      candleSeries.setData(data.candles);
+      eqSeries.setData(bt.equity_curve);
+
       if (data.signal.type !== 'WAIT') {
         candleSeries.createPriceLine({ price: data.signal.entry, color: '#94a3b8', lineWidth: 1, lineStyle: 2, title: 'ENTRY' });
-        candleSeries.createPriceLine({ price: data.signal.sl, color: '#ef4444', lineWidth: 2, lineStyle: 0, title: 'SL (0.25%)' });
-        candleSeries.createPriceLine({ price: data.signal.be_trigger, color: '#f59e0b', lineWidth: 1, lineStyle: 1, title: 'BE+ Trigger' });
-        candleSeries.createPriceLine({ price: data.signal.tp, color: '#10b981', lineWidth: 2, lineStyle: 0, title: 'TP (1:2.25)' });
+        candleSeries.createPriceLine({ price: data.signal.sl, color: '#ef4444', lineWidth: 2, lineStyle: 0, title: 'SL' });
+        candleSeries.createPriceLine({ price: data.signal.be_trigger, color: '#f59e0b', lineWidth: 1, lineStyle: 1, title: 'BE+' });
+        candleSeries.createPriceLine({ price: data.signal.tp, color: '#10b981', lineWidth: 2, lineStyle: 0, title: 'TP' });
       }
+
+      const tbody = document.getElementById('trade-rows');
+      tbody.innerHTML = bt.recent_trades.map(t => `
+        <tr>
+          <td>${t.exit_str}</td>
+          <td class="${t.type === 'LONG' ? 'pos' : 'neg'}" style="font-weight:700;">${t.type}</td>
+          <td>$${t.entry}</td>
+          <td>$${t.exit}</td>
+          <td>${t.reason}</td>
+          <td class="${t.pnl >= 0 ? 'pos' : 'neg'}" style="font-weight:700;">${t.pnl >= 0 ? '+' : ''}$${t.pnl}</td>
+        </tr>
+      `).join('');
     }
     loadDashboard();
   </script>

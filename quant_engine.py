@@ -23,6 +23,7 @@ BE_TRIGGER_R = 1.5
 
 os.makedirs("data", exist_ok=True)
 HISTORY_CSV = "data/xauusd_m15_history.csv"
+TRADES_CSV = "data/all_trades.csv"
 
 def fetch_and_store_history():
     api_key = os.getenv("TWELVE_DATA_KEY", "").strip()
@@ -30,15 +31,16 @@ def fetch_and_store_history():
     source_name = "Yahoo Finance (Free Feed)"
 
     if api_key:
-        url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&outputsize=3000&apikey={api_key}"
-        res = requests.get(url, timeout=25).json()
+        # ขยายเป็น 5,000 แท่ง (เพดานสูงสุดของแพ็กเกจฟรี Twelve Data)
+        url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&outputsize=5000&apikey={api_key}"
+        res = requests.get(url, timeout=30).json()
         if "values" in res:
             new_df = pd.DataFrame(res["values"])
             new_df["datetime"] = pd.to_datetime(new_df["datetime"], utc=True)
             for col in ["open", "high", "low", "close"]:
                 new_df[col] = pd.to_numeric(new_df[col], errors="coerce")
             new_df = new_df[["datetime", "open", "high", "low", "close"]].dropna()
-            source_name = "TwelveData Spot XAU/USD"
+            source_name = "TwelveData Spot XAU/USD (5,000 Bars)"
         else:
             raise RuntimeError(f"Twelve Data Error: {res.get('message', res)}")
     else:
@@ -48,14 +50,12 @@ def fetch_and_store_history():
         df_y["datetime"] = pd.to_datetime(df_y[time_col], utc=True)
         new_df = df_y.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})[["datetime", "open", "high", "low", "close"]].dropna()
 
-    # แปลงเวลาเป็น Unix Timestamp (วินาที) เพื่อป้องกันเวลาซ้ำ 100%
     new_df["ts"] = (new_df["datetime"].astype("int64") // 10**9).astype(int)
 
-    # หากเปลี่ยนแหล่งข้อมูล (เช่น จาก Yahoo เป็น TwelveData) ให้เริ่มเก็บ CSV ใหม่ไม่ให้ราคาปนกัน
     if os.path.exists(HISTORY_CSV):
         try:
             old_df = pd.read_csv(HISTORY_CSV)
-            if "source" in old_df.columns and old_df["source"].iloc[-1] == source_name:
+            if "source" in old_df.columns and "TwelveData" in str(old_df["source"].iloc[-1]) and "TwelveData" in source_name:
                 old_df["datetime"] = pd.to_datetime(old_df["datetime"], utc=True)
                 old_df["ts"] = (old_df["datetime"].astype("int64") // 10**9).astype(int)
                 combined = pd.concat([old_df[["datetime", "ts", "open", "high", "low", "close"]], new_df])
@@ -142,8 +142,9 @@ def run_quant_backtest(df, source_name):
                     net_pnl = ((exit_price - pos["entry"]) * pos["oz"]) - pos["comm"]
                     equity += net_pnl
                     closed_trades.append({
+                        "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
                         "entry_time": pos["entry_time"], "exit_time": now_ts,
-                        "exit_str": dt.strftime("%Y-%m-%d %H:%M"), "type": "LONG",
+                        "entry_hour_utc": pos["entry_hour"], "type": "LONG",
                         "entry": round(pos["entry"], 2), "exit": round(exit_price, 2),
                         "pnl": round(net_pnl, 2), "reason": exit_reason
                     })
@@ -167,8 +168,9 @@ def run_quant_backtest(df, source_name):
                     net_pnl = ((pos["entry"] - exit_price) * pos["oz"]) - pos["comm"]
                     equity += net_pnl
                     closed_trades.append({
+                        "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
                         "entry_time": pos["entry_time"], "exit_time": now_ts,
-                        "exit_str": dt.strftime("%Y-%m-%d %H:%M"), "type": "SHORT",
+                        "entry_hour_utc": pos["entry_hour"], "type": "SHORT",
                         "entry": round(pos["entry"], 2), "exit": round(exit_price, 2),
                         "pnl": round(net_pnl, 2), "reason": exit_reason
                     })
@@ -210,6 +212,7 @@ def run_quant_backtest(df, source_name):
                     if long_sig:
                         pos = {
                             "type": "LONG", "entry": entry_p, "entry_time": now_ts,
+                            "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                             "sl": entry_p - sl_dist, "tp": entry_p + tp_dist,
                             "be_trigger": entry_p + (sl_dist * BE_TRIGGER_R),
                             "oz": oz, "comm": comm, "atr": atr_val, "is_be": False
@@ -217,6 +220,7 @@ def run_quant_backtest(df, source_name):
                     else:
                         pos = {
                             "type": "SHORT", "entry": entry_p, "entry_time": now_ts,
+                            "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                             "sl": entry_p + sl_dist, "tp": entry_p - tp_dist,
                             "be_trigger": entry_p - (sl_dist * BE_TRIGGER_R),
                             "oz": oz, "comm": comm, "atr": atr_val, "is_be": False
@@ -225,9 +229,16 @@ def run_quant_backtest(df, source_name):
         if i % 4 == 0:
             equity_curve.append({"time": now_ts, "value": round(equity, 2)})
 
+    # บันทึกประวัติการเทรดทุกไม้ลง CSV เพื่อใช้วิเคราะห์เชิงลึก
+    if closed_trades:
+        pd.DataFrame(closed_trades).to_csv(TRADES_CSV, index=False)
+
     total_trades = len(closed_trades)
     winners = [t for t in closed_trades if t["pnl"] > 0]
     losers = [t for t in closed_trades if t["pnl"] <= 0]
+    longs = [t for t in closed_trades if t["type"] == "LONG"]
+    shorts = [t for t in closed_trades if t["type"] == "SHORT"]
+
     win_rate = (len(winners) / total_trades * 100.0) if total_trades > 0 else 0.0
     gross_win = sum(t["pnl"] for t in winners)
     gross_loss = abs(sum(t["pnl"] for t in losers))
@@ -288,6 +299,8 @@ def run_quant_backtest(df, source_name):
             "win_rate": round(win_rate, 2),
             "profit_factor": round(profit_factor, 2),
             "days_hit_target": days_hit_target,
+            "long_pnl": round(sum(t["pnl"] for t in longs), 2),
+            "short_pnl": round(sum(t["pnl"] for t in shorts), 2),
             "recent_trades": closed_trades[-15:][::-1],
             "equity_curve": equity_curve
         },
@@ -300,4 +313,4 @@ if __name__ == "__main__":
     state = run_quant_backtest(df, source_name)
     with open("data/state.json", "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
-    print(f"Success! Bars: {len(df)} | Trades: {state['backtest']['total_trades']} | Net PnL: ${state['backtest']['net_pnl']}")
+    print(f"Audit Complete | Bars: {len(df)} | Trades: {state['backtest']['total_trades']} | Long PnL: ${state['backtest']['long_pnl']} | Short PnL: ${state['backtest']['short_pnl']}")

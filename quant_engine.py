@@ -25,13 +25,16 @@ os.makedirs("data", exist_ok=True)
 HISTORY_CSV = "data/xauusd_m15_history.csv"
 TRADES_CSV = "data/all_trades.csv"
 
+def to_unix_seconds(series):
+    # แปลงเวลาเป็นวินาทีเต็ม 10 หลักอย่างแม่นยำ ป้องกันตัวเลขเพี้ยน
+    return series.apply(lambda x: int(x.timestamp()))
+
 def fetch_and_store_history():
     api_key = os.getenv("TWELVE_DATA_KEY", "").strip()
     new_df = pd.DataFrame()
     source_name = "Yahoo Finance (Free Feed)"
 
     if api_key:
-        # ขยายเป็น 5,000 แท่ง (เพดานสูงสุดของแพ็กเกจฟรี Twelve Data)
         url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&outputsize=5000&apikey={api_key}"
         res = requests.get(url, timeout=30).json()
         if "values" in res:
@@ -50,14 +53,14 @@ def fetch_and_store_history():
         df_y["datetime"] = pd.to_datetime(df_y[time_col], utc=True)
         new_df = df_y.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})[["datetime", "open", "high", "low", "close"]].dropna()
 
-    new_df["ts"] = (new_df["datetime"].astype("int64") // 10**9).astype(int)
+    new_df["ts"] = to_unix_seconds(new_df["datetime"])
 
     if os.path.exists(HISTORY_CSV):
         try:
             old_df = pd.read_csv(HISTORY_CSV)
             if "source" in old_df.columns and "TwelveData" in str(old_df["source"].iloc[-1]) and "TwelveData" in source_name:
                 old_df["datetime"] = pd.to_datetime(old_df["datetime"], utc=True)
-                old_df["ts"] = (old_df["datetime"].astype("int64") // 10**9).astype(int)
+                old_df["ts"] = to_unix_seconds(old_df["datetime"])
                 combined = pd.concat([old_df[["datetime", "ts", "open", "high", "low", "close"]], new_df])
             else:
                 combined = new_df
@@ -112,7 +115,7 @@ def run_quant_backtest(df, source_name):
 
         dt = bar["datetime"]
         bar_date = dt.date()
-        now_ts = int(bar["ts"])
+        now_ts = int(bar["ts"])  # วินาทีเต็ม 10 หลัก
 
         if current_day != bar_date:
             current_day = bar_date
@@ -189,16 +192,18 @@ def run_quant_backtest(df, source_name):
             today_target_logged = True
 
         if pos is None and not is_daily_target_hit and daily_dd < HARD_DAILY_DD_PCT:
+            # ตรวจสอบความเสี่ยงสะสมใน 2 ชั่วโมง (7,200 วินาทีจริง)
             used_2hr_money = sum(abs(t["pnl"]) for t in closed_trades[-10:] if (now_ts - t["exit_time"]) <= 7200 and t["pnl"] < 0)
             used_2hr_pct = (used_2hr_money / equity) * 100.0
 
-            in_session = (6 <= dt.hour <= 18) and not (dt.hour == 20 and dt.minute >= 45)
+            in_session = not (20 <= dt.hour <= 22)
             if in_session and (used_2hr_pct + RISK_PER_TRADE_PCT) <= MAX_2HR_RISK_PCT:
+                # ฝั่ง Long เข้าไวตามเทรนด์หลัก / ฝั่ง Short ต้องยืนยันแรงขายชัด (macroZ < -0.5)
                 is_bull = (bar["macro_z"] > 0.0) and (bar["macro_z"] > macro_prev2)
-                is_bear = (bar["macro_z"] < -0.3) and (bar["macro_z"] < macro_prev2)
+                is_bear = (bar["macro_z"] < -0.5) and (bar["macro_z"] < macro_prev2)
 
-                long_sig = is_bull and (prev["fast_z"] < -0.4) and (bar["fast_z"] > prev["fast_z"]) and (bar["close"] > prev["high"])
-                short_sig = is_bear and (prev["fast_z"] > 0.4) and (bar["fast_z"] < prev["fast_z"]) and (bar["close"] < prev["low"])
+                long_sig = is_bull and (prev["fast_z"] < -0.35) and (bar["fast_z"] > prev["fast_z"]) and (bar["close"] > bar["open"])
+                short_sig = is_bear and (prev["fast_z"] > 0.5) and (bar["fast_z"] < prev["fast_z"]) and (bar["close"] < bar["open"])
 
                 atr_val = float(bar["atr"])
                 sl_dist = atr_val * SL_ATR_MULT
@@ -229,9 +234,7 @@ def run_quant_backtest(df, source_name):
         if i % 4 == 0:
             equity_curve.append({"time": now_ts, "value": round(equity, 2)})
 
-    # บันทึกประวัติการเทรดทุกไม้ลง CSV เพื่อใช้วิเคราะห์เชิงลึก
-    if closed_trades:
-        pd.DataFrame(closed_trades).to_csv(TRADES_CSV, index=False)
+    pd.DataFrame(closed_trades).to_csv(TRADES_CSV, index=False)
 
     total_trades = len(closed_trades)
     winners = [t for t in closed_trades if t["pnl"] > 0]
@@ -246,13 +249,12 @@ def run_quant_backtest(df, source_name):
     net_pnl = equity - INITIAL_CAPITAL
     net_pnl_pct = (net_pnl / INITIAL_CAPITAL) * 100.0
 
-    # สัญญาณล่าสุด
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     macro_prev2 = df.iloc[-4]["macro_z"]
     is_bull_now = (curr["macro_z"] > 0.0) and (curr["macro_z"] > macro_prev2)
-    is_bear_now = (curr["macro_z"] < -0.3) and (curr["macro_z"] < macro_prev2)
-    in_sess_now = 6 <= curr["datetime"].hour <= 18
+    is_bear_now = (curr["macro_z"] < -0.5) and (curr["macro_z"] < macro_prev2)
+    in_sess_now = not (20 <= curr["datetime"].hour <= 22)
 
     sig_type = "WAIT"
     entry_now = float(curr["close"])
@@ -261,9 +263,9 @@ def run_quant_backtest(df, source_name):
     tp_d = atr_now * TP_ATR_MULT
     lot_now = round((equity * (RISK_PER_TRADE_PCT / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
 
-    if in_sess_now and is_bull_now and (prev["fast_z"] < -0.4) and (curr["fast_z"] > prev["fast_z"]) and (curr["close"] > prev["high"]):
+    if in_sess_now and is_bull_now and (prev["fast_z"] < -0.35) and (curr["fast_z"] > prev["fast_z"]) and (curr["close"] > curr["open"]):
         sig_type = "LONG"
-    elif in_sess_now and is_bear_now and (prev["fast_z"] > 0.4) and (curr["fast_z"] < prev["fast_z"]) and (curr["close"] < prev["low"]):
+    elif in_sess_now and is_bear_now and (prev["fast_z"] > 0.5) and (curr["fast_z"] < prev["fast_z"]) and (curr["close"] < curr["open"]):
         sig_type = "SHORT"
 
     candles = [

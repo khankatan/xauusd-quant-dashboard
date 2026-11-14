@@ -8,19 +8,18 @@ import yfinance as yf
 from datetime import datetime, timezone
 
 INITIAL_CAPITAL = 100000.0
-RISK_PER_TRADE_PCT = 0.25
-MAX_2HR_RISK_PCT = 0.75       # คุมเข้มขึ้น: ไม่เกิน 3 ไม้ใน 2 ชม.
-DAILY_TARGET_PCT = 0.35       # ล็อกกำไรรายวัน +0.35%
-HARD_DAILY_DD_PCT = 0.55      # ตัดวงจรขาดทุนรายวันทันทีเมื่อแพ้ครบ 2 ไม้ (-0.55%)
+RISK_PER_TRADE_PCT = 0.25     # เสี่ยง 0.25% ต่อไม้
+MAX_2HR_RISK_PCT = 0.75       # เพดานความเสี่ยงใน 2 ชม.
+DAILY_TARGET_PCT = 0.25       # เป้ากำไรรายวัน +0.25% (ถึงแล้วหยุดทันที รอวันถัดไป)
+HARD_DAILY_DD_PCT = 0.55      # เพดานขาดทุนรายวัน -0.55% (แพ้ครบ 2 ไม้หยุดทันที)
 COMMISSION_PER_OZ = 0.035
 
-EMA_TREND_LEN = 200           # กรองเทรนด์ใหญ่ระดับ 50 ชั่วโมง (ป้องกันเทรดสวนเทรนด์)
-MACRO_Z_LEN = 100
+EMA_INTRADAY_LEN = 50         # ใช้ EMA 50 จับทิศทางรายวัน (ออกสัญญาณได้ทุกวัน)
 FAST_Z_LEN = 14
 ATR_LEN = 14
-SL_ATR_MULT = 2.2             # ขยาย SL กันไส้เทียนสะบัด
-TP_ATR_MULT = 4.4             # เป้ากำไร 1:2.0 R:R
-BE_TRIGGER_R = 1.3            # เลื่อนหน้าทุนไวขึ้นที่ 1.3R
+SL_ATR_MULT = 1.8             # SL พอดีกับรอบสวิง M15
+TP_ATR_MULT = 2.2             # TP 2.2 ATR (~1:1.22 R:R) -> ชนะ 1 ไม้ได้ ~+0.30% ทะลุเป้า +0.25% ทันที!
+BE_TRIGGER_R = 0.9            # วิ่งเกิน 0.9R เลื่อนหน้าทุนกันขาดทุนทันที
 
 os.makedirs("data", exist_ok=True)
 HISTORY_CSV = "data/xauusd_m15_history.csv"
@@ -70,25 +69,25 @@ def fetch_and_store_history():
         combined = new_df
 
     combined = combined.drop_duplicates(subset=["ts"]).sort_values("ts").reset_index(drop=True)
+    # ตัดวันเสาร์-อาทิตย์ออก
+    combined = combined[combined["datetime"].dt.dayofweek < 5].reset_index(drop=True)
     combined["source"] = source_name
     combined.to_csv(HISTORY_CSV, index=False)
     return combined, source_name
 
-def is_valid_thai_session(utc_dt):
-    # แปลงเป็นชั่วโมงเวลาไทย (UTC+7)
+def is_active_thai_session(utc_dt):
+    # แปลงเป็นเวลาไทย (UTC+7)
     thai_hour = (utc_dt.hour + 7) % 24
-    # ตัดช่วงอันตรายจากผล Audit: 03:00-07:59 น. (ตลาดปิด/เปิดเอเชีย) และ 20:00-21:59 น. (ข่าวผันผวนสะบัดสองทาง)
-    if 3 <= thai_hour <= 7:
-        return False
-    if 20 <= thai_hour <= 21:
+    # เทรด 08:00 - 01:59 น. เวลาไทย (18 ชม. ต่อวัน) ตัดเฉพาะช่วง 02:00 - 07:59 น. ที่ตลาดปิดและสเปรดถ่าง
+    if 2 <= thai_hour <= 7:
         return False
     return True
 
 def run_quant_backtest(df, source_name):
     df = df.copy()
-    df["ema_trend"] = df["close"].ewm(span=EMA_TREND_LEN, adjust=False).mean()
-    df["macro_mean"] = df["close"].rolling(MACRO_Z_LEN).mean()
-    df["macro_std"] = df["close"].rolling(MACRO_Z_LEN).std()
+    df["ema_fast"] = df["close"].ewm(span=EMA_INTRADAY_LEN, adjust=False).mean()
+    df["macro_mean"] = df["close"].rolling(100).mean()
+    df["macro_std"] = df["close"].rolling(100).std()
     df["macro_z"] = (df["close"] - df["macro_mean"]) / df["macro_std"].replace(0, np.nan)
 
     df["fast_mean"] = df["close"].rolling(FAST_Z_LEN).mean()
@@ -107,32 +106,35 @@ def run_quant_backtest(df, source_name):
 
     current_day = None
     daily_start_eq = INITIAL_CAPITAL
-    daily_high_water = INITIAL_CAPITAL
     days_hit_target = 0
     today_target_logged = False
+    today_loss_locked = False
 
     pos = None
     closed_trades = []
     equity_curve = []
 
-    start_idx = EMA_TREND_LEN + 5
+    start_idx = 105
     for i in range(start_idx, len(df) - 1):
         bar = df.iloc[i]
         prev = df.iloc[i - 1]
-        macro_prev2 = df.iloc[i - 2]["macro_z"]
+        ema_prev2 = df.iloc[i - 2]["ema_fast"]
 
-        if pd.isna(bar["macro_z"]) or pd.isna(bar["fast_z"]) or pd.isna(bar["atr"]) or pd.isna(macro_prev2):
+        if pd.isna(bar["fast_z"]) or pd.isna(bar["atr"]) or pd.isna(ema_prev2):
             continue
 
         dt = bar["datetime"]
-        bar_date = dt.date()
+        # นับวันตามเวลาไทย (UTC+7) เพื่อให้รอบวันตรงกับที่คุณดูบนหน้าจอ
+        thai_dt = dt + pd.Timedelta(hours=7)
+        bar_date = thai_dt.date()
         now_ts = int(bar["ts"])
 
+        # รีเซ็ตสถานะเมื่อขึ้นวันใหม่ตามเวลาไทย
         if current_day != bar_date:
             current_day = bar_date
             daily_start_eq = equity
-            daily_high_water = equity
             today_target_logged = False
+            today_loss_locked = False
 
         if pos is not None:
             exit_price = None
@@ -140,7 +142,7 @@ def run_quant_backtest(df, source_name):
 
             if pos["type"] == "LONG":
                 if not pos["is_be"] and bar["high"] >= pos["be_trigger"]:
-                    pos["sl"] = pos["entry"] + (pos["atr"] * 0.1)
+                    pos["sl"] = pos["entry"] + (pos["atr"] * 0.08)
                     pos["is_be"] = True
                 if bar["low"] <= pos["sl"]:
                     exit_price = pos["sl"]
@@ -148,7 +150,7 @@ def run_quant_backtest(df, source_name):
                 elif bar["high"] >= pos["tp"]:
                     exit_price = pos["tp"]
                     exit_reason = "TP"
-                elif dt.hour == 20 and dt.minute >= 45:
+                elif thai_dt.hour == 2 and thai_dt.minute >= 30:
                     exit_price = float(bar["close"])
                     exit_reason = "Rollover"
 
@@ -166,7 +168,7 @@ def run_quant_backtest(df, source_name):
 
             elif pos["type"] == "SHORT":
                 if not pos["is_be"] and bar["low"] <= pos["be_trigger"]:
-                    pos["sl"] = pos["entry"] - (pos["atr"] * 0.1)
+                    pos["sl"] = pos["entry"] - (pos["atr"] * 0.08)
                     pos["is_be"] = True
                 if bar["high"] >= pos["sl"]:
                     exit_price = pos["sl"]
@@ -174,7 +176,7 @@ def run_quant_backtest(df, source_name):
                 elif bar["low"] <= pos["tp"]:
                     exit_price = pos["tp"]
                     exit_reason = "TP"
-                elif dt.hour == 20 and dt.minute >= 45:
+                elif thai_dt.hour == 2 and thai_dt.minute >= 30:
                     exit_price = float(bar["close"])
                     exit_reason = "Rollover"
 
@@ -193,26 +195,30 @@ def run_quant_backtest(df, source_name):
         peak_equity = max(peak_equity, equity)
         max_dd_pct = max(max_dd_pct, ((peak_equity - equity) / peak_equity) * 100.0)
 
-        daily_high_water = max(daily_high_water, equity)
-        daily_dd = ((daily_high_water - equity) / daily_high_water) * 100.0
         daily_pnl_pct = ((equity - daily_start_eq) / daily_start_eq) * 100.0
 
-        is_daily_target_hit = daily_pnl_pct >= DAILY_TARGET_PCT
-        if is_daily_target_hit and not today_target_logged:
+        # กฎข้อ 1: กำไรวันนี้ถึง +0.25% แล้ว -> ล็อกกำไรหยุดเทรดทันที รอวันถัดไป
+        if daily_pnl_pct >= DAILY_TARGET_PCT and not today_target_logged:
             days_hit_target += 1
             today_target_logged = True
 
-        if pos is None and not is_daily_target_hit and daily_dd < HARD_DAILY_DD_PCT:
+        # กฎข้อ 2: แพ้ติดกันจนขาดทุนของวันถึงเพดาน (-0.55%) -> หยุดเทรดวันนั้นทันที
+        if daily_pnl_pct <= -HARD_DAILY_DD_PCT:
+            today_loss_locked = True
+
+        can_open_today = (not today_target_logged) and (not today_loss_locked)
+
+        if pos is None and can_open_today:
             used_2hr_money = sum(abs(t["pnl"]) for t in closed_trades[-10:] if (now_ts - t["exit_time"]) <= 7200 and t["pnl"] < 0)
             used_2hr_pct = (used_2hr_money / equity) * 100.0
 
-            if is_valid_thai_session(dt) and (used_2hr_pct + RISK_PER_TRADE_PCT) <= MAX_2HR_RISK_PCT:
-                # เทรนด์สมมาตร + กรองด้วย EMA 200 ป้องกันการสวนเทรนด์ใหญ่
-                is_bull = (bar["close"] > bar["ema_trend"]) and (bar["macro_z"] > 0.35) and (bar["macro_z"] > macro_prev2)
-                is_bear = (bar["close"] < bar["ema_trend"]) and (bar["macro_z"] < -0.35) and (bar["macro_z"] < macro_prev2)
+            if is_active_thai_session(dt) and (used_2hr_pct + RISK_PER_TRADE_PCT) <= MAX_2HR_RISK_PCT:
+                # ทิศทางรายวันจาก EMA 50 + จังหวะย่อตัว Fast Z-Score (-0.25 / +0.25) เพื่อให้ออกไม้ได้ทุกวัน
+                is_bull_day = (bar["close"] > bar["ema_fast"]) and (bar["ema_fast"] > ema_prev2)
+                is_bear_day = (bar["close"] < bar["ema_fast"]) and (bar["ema_fast"] < ema_prev2)
 
-                long_sig = is_bull and (prev["fast_z"] < -0.4) and (bar["fast_z"] > prev["fast_z"]) and (bar["close"] > bar["open"])
-                short_sig = is_bear and (prev["fast_z"] > 0.4) and (bar["fast_z"] < prev["fast_z"]) and (bar["close"] < bar["open"])
+                long_sig = is_bull_day and (prev["fast_z"] < -0.25) and (bar["fast_z"] > prev["fast_z"]) and (bar["close"] > bar["open"])
+                short_sig = is_bear_day and (prev["fast_z"] > 0.25) and (bar["fast_z"] < prev["fast_z"]) and (bar["close"] < bar["open"])
 
                 atr_val = float(bar["atr"])
                 sl_dist = atr_val * SL_ATR_MULT
@@ -260,10 +266,10 @@ def run_quant_backtest(df, source_name):
 
     curr = df.iloc[-2]
     prev = df.iloc[-3]
-    macro_prev2 = df.iloc[-4]["macro_z"]
-    is_bull_now = (curr["close"] > curr["ema_trend"]) and (curr["macro_z"] > 0.35) and (curr["macro_z"] > macro_prev2)
-    is_bear_now = (curr["close"] < curr["ema_trend"]) and (curr["macro_z"] < -0.35) and (curr["macro_z"] < macro_prev2)
-    in_sess_now = is_valid_thai_session(curr["datetime"])
+    ema_prev2 = df.iloc[-4]["ema_fast"]
+    is_bull_now = (curr["close"] > curr["ema_fast"]) and (curr["ema_fast"] > ema_prev2)
+    is_bear_now = (curr["close"] < curr["ema_fast"]) and (curr["ema_fast"] < ema_prev2)
+    in_sess_now = is_active_thai_session(curr["datetime"])
 
     sig_type = "WAIT"
     entry_now = float(curr["close"])
@@ -272,9 +278,9 @@ def run_quant_backtest(df, source_name):
     tp_d = atr_now * TP_ATR_MULT
     lot_now = round((equity * (RISK_PER_TRADE_PCT / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
 
-    if in_sess_now and is_bull_now and (prev["fast_z"] < -0.4) and (curr["fast_z"] > prev["fast_z"]) and (curr["close"] > curr["open"]):
+    if in_sess_now and is_bull_now and (prev["fast_z"] < -0.25) and (curr["fast_z"] > prev["fast_z"]) and (curr["close"] > curr["open"]):
         sig_type = "LONG"
-    elif in_sess_now and is_bear_now and (prev["fast_z"] > 0.4) and (curr["fast_z"] < prev["fast_z"]) and (curr["close"] < curr["open"]):
+    elif in_sess_now and is_bear_now and (prev["fast_z"] > 0.25) and (curr["fast_z"] < prev["fast_z"]) and (curr["close"] < curr["open"]):
         sig_type = "SHORT"
 
     candles = [
@@ -324,4 +330,4 @@ if __name__ == "__main__":
     state = run_quant_backtest(df, source_name)
     with open("data/state.json", "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
-    print(f"Audit V2 Complete | Bars: {len(df)} | Trades: {state['backtest']['total_trades']} | Long PnL: ${state['backtest']['long_pnl']} | Short PnL: ${state['backtest']['short_pnl']}")
+    print(f"Daily-Active V4 Complete | Bars: {len(df)} | Trades: {state['backtest']['total_trades']} | Days Hit +0.25%: {state['backtest']['days_hit_target']} | Net PnL: ${state['backtest']['net_pnl']}")

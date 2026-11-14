@@ -14,6 +14,39 @@ from engine.risk_manager import RiskGuard
 
 os.makedirs("data", exist_ok=True)
 
+def is_us_dst_active(utc_dt):
+    """
+    ตรวจสอบฤดูออมแสงสหรัฐฯ (US DST):
+    เริ่มวันอาทิตย์ที่ 2 ของเดือนมีนาคม -> สิ้นสุดวันอาทิตย์ที่ 1 ของเดือนพฤศจิกายน
+    """
+    year = utc_dt.year
+    # หาวันอาทิตย์ที่ 2 ของเดือนมีนาคม
+    mar_first = datetime(year, 3, 1, tzinfo=timezone.utc)
+    mar_second_sun = 1 + ((6 - mar_first.weekday()) % 7) + 7
+    dst_start = datetime(year, 3, mar_second_sun, 7, 0, tzinfo=timezone.utc)
+
+    # หาวันอาทิตย์ที่ 1 ของเดือนพฤศจิกายน
+    nov_first = datetime(year, 11, 1, tzinfo=timezone.utc)
+    nov_first_sun = 1 + ((6 - nov_first.weekday()) % 7)
+    dst_end = datetime(year, 11, nov_first_sun, 6, 0, tzinfo=timezone.utc)
+
+    return dst_start <= utc_dt < dst_end
+
+def must_close_for_weekend(utc_dt):
+    """
+    บังคับปิดออเดอร์คืนวันศุกร์ก่อนตลาดปิด 1.5 - 2 ชั่วโมง (ตามฤดูกาลของไทย):
+    - ฤดูร้อน (กลาง มี.ค. - ต้น พ.ย.): ตลาดปิด 04:00 น. เช้าเสาร์ไทย (21:00 UTC) -> ปิดที่ 19:30 UTC (02:30 น. เช้าเสาร์ไทย)
+    - ฤดูหนาว (ต้น พ.ย. - กลาง มี.ค.): ตลาดปิด 05:00 น. เช้าเสาร์ไทย (22:00 UTC) -> ปิดที่ 20:00 UTC (03:00 น. เช้าเสาร์ไทย)
+    """
+    wd = utc_dt.weekday()
+    if wd >= 5:  # วันเสาร์-อาทิตย์ (ป้องกันเผื่อฟีดข้ามวัน)
+        return True
+    if wd == 4:  # วันศุกร์
+        close_hour_utc = 19 if is_us_dst_active(utc_dt) else 20
+        if (utc_dt.hour > close_hour_utc) or (utc_dt.hour == close_hour_utc and utc_dt.minute >= 30 if close_hour_utc == 19 else utc_dt.hour >= close_hour_utc):
+            return True
+    return False
+
 def run_modular_engine():
     df, source_name = fetch_market_data()
     df = compute_all_features(df)
@@ -36,7 +69,7 @@ def run_modular_engine():
         if pd.isna(bar["vwap"]) or pd.isna(bar["vwrsi"]) or pd.isna(bar["atr"]) or pd.isna(bar["h1_ema"]):
             continue
 
-        dt = bar["datetime"]
+        dt = bar["datetime"].to_pydatetime()
         bar_date = bar["thai_date"]
         now_ts = int(bar["ts"])
         t_mins = int(bar["thai_mins"])
@@ -54,6 +87,9 @@ def run_modular_engine():
 
         guard.on_new_bar(bar_date)
 
+        # ถือข้ามคืน จันทร์-พฤหัส ได้ตามกฎ Standard FTMO / บังคับปิดเฉพาะคืนวันศุกร์ก่อนตลาดปิด!
+        friday_close_now = must_close_for_weekend(dt)
+
         if pos is not None:
             exit_price = None
             exit_reason = None
@@ -68,9 +104,9 @@ def run_modular_engine():
                 elif bar["high"] >= pos["tp"]:
                     exit_price = pos["tp"]
                     exit_reason = f"{pos['agent']}{pos['conv']}-TP"
-                elif bar["thai_hour"] == 2 and bar["thai_minute"] >= 30:
+                elif friday_close_now:
                     exit_price = float(bar["close"])
-                    exit_reason = "Rollover"
+                    exit_reason = "Weekend-Close"
 
                 if exit_price is not None:
                     net_pnl = ((exit_price - pos["entry"]) * pos["oz"]) - pos["comm"]
@@ -95,9 +131,9 @@ def run_modular_engine():
                 elif bar["low"] <= pos["tp"]:
                     exit_price = pos["tp"]
                     exit_reason = f"{pos['agent']}{pos['conv']}-TP"
-                elif bar["thai_hour"] == 2 and bar["thai_minute"] >= 30:
+                elif friday_close_now:
                     exit_price = float(bar["close"])
-                    exit_reason = "Rollover"
+                    exit_reason = "Weekend-Close"
 
                 if exit_price is not None:
                     net_pnl = ((pos["entry"] - exit_price) * pos["oz"]) - pos["comm"]
@@ -112,7 +148,7 @@ def run_modular_engine():
                     })
                     pos = None
 
-        if pos is None and guard.can_trade():
+        if pos is None and (not friday_close_now) and guard.can_trade():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars)
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "LONG" else bool(bar["macro_bear_conv"])
@@ -133,7 +169,6 @@ def run_modular_engine():
     longs = [t for t in closed_trades if t["type"] == "LONG"]
     shorts = [t for t in closed_trades if t["type"] == "SHORT"]
 
-    # สรุปผลงานแยกตามสมองย่อย (Agent Breakdown)
     def agent_stats(keyword):
         sub = [t for t in closed_trades if keyword in t["reason"]]
         w = [t for t in sub if t["pnl"] > 0]
@@ -151,7 +186,7 @@ def run_modular_engine():
         "VWAP_PB": agent_stats("VWAP-PB"),
         "EV_PB": agent_stats("EV-PB"),
         "OI_BOOSTED": agent_stats("+OI"),
-        "ROLLOVER": agent_stats("Rollover")
+        "ROLLOVER": agent_stats("Weekend-Close")
     }
 
     win_rate = (len(winners) / total_trades * 100.0) if total_trades > 0 else 0.0
@@ -164,8 +199,9 @@ def run_modular_engine():
 
     curr = df.iloc[-2]
     prev = df.iloc[-3]
+    curr_dt = curr["datetime"].to_pydatetime()
     sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars)
-    sig_type = sig_now if sig_now else "WAIT"
+    sig_type = sig_now if (sig_now and not must_close_for_weekend(curr_dt)) else "WAIT"
     is_conv_now = (bool(curr["macro_bull_conv"]) if sig_type == "LONG" else bool(curr["macro_bear_conv"])) if sig_type != "WAIT" else False
 
     entry_now = float(curr["close"])
@@ -184,8 +220,9 @@ def run_modular_engine():
         return 0.0 if (val is None or (isinstance(val, float) and math.isnan(val))) else round(float(val), 3)
 
     h1_txt = "H1 BULL" if curr["h1_close"] >= curr["h1_ema"] else "H1 BEAR"
+    dst_txt = "US-SUMMER (Fri Close 02:30 TH)" if is_us_dst_active(curr_dt) else "US-WINTER (Fri Close 03:00 TH)"
     macro_txt = str(curr["macro_status"]) if "macro_status" in curr else "OI+DXY: STANDARD"
-    regime_label = f"{h1_txt} | {macro_txt}"
+    regime_label = f"{h1_txt} | {macro_txt} | {dst_txt}"
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -234,7 +271,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V7 Modular+OI Complete | Net PnL: ${state['backtest']['net_pnl']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}% ({guard.worst_dd_date})")
+    print(f"V7.1 Complete | Net PnL: ${state['backtest']['net_pnl']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}% ({guard.worst_dd_date})")
 
 if __name__ == "__main__":
     run_modular_engine()

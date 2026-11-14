@@ -21,10 +21,12 @@
     table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 10px; overflow: hidden; font-size: 13px; }
     th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #334155; }
     th { background: #0f172a; color: #94a3b8; font-size: 11px; text-transform: uppercase; }
+    #err-box { display: none; background: #7f1d1d; color: #fecaca; padding: 12px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; }
   </style>
 </head>
 <body>
   <div class="container">
+    <div id="err-box"></div>
     <div class="header">
       <div>
         <h2 style="margin:0;">XAUUSD Quant Engine (GitHub Free Backtest & Live)</h2>
@@ -84,11 +86,11 @@
     <div class="charts-row">
       <div class="chart-box">
         <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">กราฟราคา XAUUSD M15 (300 แท่งล่าสุด + เส้นมาร์ค)</div>
-        <div id="price-chart" style="height:360px;"></div>
+        <div id="price-chart" style="width:100%;height:360px;"></div>
       </div>
       <div class="chart-box">
         <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">กราฟการเติบโตของพอร์ต (Backtest Equity Curve)</div>
-        <div id="eq-chart" style="height:360px;"></div>
+        <div id="eq-chart" style="width:100%;height:360px;"></div>
       </div>
     </div>
 
@@ -103,6 +105,7 @@
 
   <script>
     const priceChart = LightweightCharts.createChart(document.getElementById('price-chart'), {
+      autoSize: true,
       layout: { background: { color: '#1e293b' }, textColor: '#cbd5e1' },
       grid: { vertLines: { color: '#334155' }, horzLines: { color: '#334155' } },
       timeScale: { timeVisible: true }
@@ -112,6 +115,7 @@
     });
 
     const eqChart = LightweightCharts.createChart(document.getElementById('eq-chart'), {
+      autoSize: true,
       layout: { background: { color: '#1e293b' }, textColor: '#cbd5e1' },
       grid: { vertLines: { color: '#334155' }, horzLines: { color: '#334155' } },
       timeScale: { timeVisible: true }
@@ -121,53 +125,66 @@
     });
 
     async function loadDashboard() {
-      const res = await fetch('./data/state.json?t=' + Date.now());
-      const data = await res.json();
+      const errBox = document.getElementById('err-box');
+      errBox.style.display = 'none';
+      try {
+        const res = await fetch('./data/state.json?t=' + Date.now());
+        if (!res.ok) throw new Error('โหลดไฟล์ state.json ไม่สำเร็จ (HTTP ' + res.status + ')');
+        const data = await res.json();
 
-      document.getElementById('meta').innerText = `อัปเดต: ${data.updated_utc} | แหล่งข้อมูล: ${data.data_source}`;
-      
-      const sigEl = document.getElementById('sig-type');
-      sigEl.innerText = data.signal.type;
-      sigEl.className = 'val ' + (data.signal.type === 'LONG' ? 'pos' : data.signal.type === 'SHORT' ? 'neg' : 'wait');
-      document.getElementById('sig-lot').innerText = `Lot แนะนำ (พอร์ต 100k): ${data.signal.lot_size} Lot`;
-      document.getElementById('sig-entry').innerText = data.signal.entry ? `$${data.signal.entry}` : `ราคาปัจจุบัน $${data.current_price}`;
-      document.getElementById('sig-be').innerText = data.signal.be_trigger ? `เลื่อน SL หน้าทุนที่: $${data.signal.be_trigger}` : 'รอจังหวะ Pullback';
-      document.getElementById('sig-sl-tp').innerHTML = data.signal.sl ? `<span class="neg">SL: $${data.signal.sl}</span> | <span class="pos">TP: $${data.signal.tp}</span>` : 'รอสัญญาณเข้า';
-      document.getElementById('regime').innerText = data.regime;
-      document.getElementById('z-vals').innerText = `Macro Z: ${data.macro_z} | Fast Z: ${data.fast_z} | ATR: $${data.atr}`;
+        document.getElementById('meta').innerText = `อัปเดต: ${data.updated_utc} | แหล่งข้อมูล: ${data.data_source}`;
+        
+        const sigEl = document.getElementById('sig-type');
+        sigEl.innerText = data.signal.type;
+        sigEl.className = 'val ' + (data.signal.type === 'LONG' ? 'pos' : data.signal.type === 'SHORT' ? 'neg' : 'wait');
+        document.getElementById('sig-lot').innerText = `Lot แนะนำ (พอร์ต 100k): ${data.signal.lot_size} Lot`;
+        document.getElementById('sig-entry').innerText = data.signal.entry ? `$${data.signal.entry}` : `ราคาปัจจุบัน $${data.current_price}`;
+        document.getElementById('sig-be').innerText = data.signal.be_trigger ? `เลื่อน SL หน้าทุนที่: $${data.signal.be_trigger}` : 'รอจังหวะ Pullback';
+        document.getElementById('sig-sl-tp').innerHTML = data.signal.sl ? `<span class="neg">SL: $${data.signal.sl}</span> | <span class="pos">TP: $${data.signal.tp}</span>` : 'รอสัญญาณเข้า';
+        document.getElementById('regime').innerText = data.regime;
+        document.getElementById('z-vals').innerText = `Macro Z: ${data.macro_z} | Fast Z: ${data.fast_z} | ATR: $${data.atr}`;
 
-      // Backtest Stats
-      const bt = data.backtest;
-      const pnlEl = document.getElementById('bt-pnl');
-      pnlEl.innerText = `${bt.net_pnl >= 0 ? '+' : ''}$${bt.net_pnl.toLocaleString()} (${bt.net_pnl_pct}%)`;
-      pnlEl.className = 'val ' + (bt.net_pnl >= 0 ? 'pos' : 'neg');
-      document.getElementById('bt-range').innerText = data.history_range;
-      document.getElementById('bt-wr').innerText = `${bt.win_rate}% (${bt.total_trades} ไม้)`;
-      document.getElementById('bt-pf').innerText = `Profit Factor: ${bt.profit_factor}`;
-      document.getElementById('bt-dd').innerText = `${bt.max_dd_pct}%`;
-      document.getElementById('bt-days').innerText = `${bt.days_hit_target} วัน`;
+        const bt = data.backtest;
+        const pnlEl = document.getElementById('bt-pnl');
+        pnlEl.innerText = `${bt.net_pnl >= 0 ? '+' : ''}$${bt.net_pnl.toLocaleString()} (${bt.net_pnl_pct}%)`;
+        pnlEl.className = 'val ' + (bt.net_pnl >= 0 ? 'pos' : 'neg');
+        document.getElementById('bt-range').innerText = data.history_range;
+        document.getElementById('bt-wr').innerText = `${bt.win_rate}% (${bt.total_trades} ไม้)`;
+        document.getElementById('bt-pf').innerText = `Profit Factor: ${bt.profit_factor}`;
+        document.getElementById('bt-dd').innerText = `${bt.max_dd_pct}%`;
+        document.getElementById('bt-days').innerText = `${bt.days_hit_target} วัน`;
 
-      candleSeries.setData(data.candles);
-      eqSeries.setData(bt.equity_curve);
+        if (data.candles && data.candles.length > 0) {
+          candleSeries.setData(data.candles);
+          priceChart.timeScale().fitContent();
+        }
+        if (bt.equity_curve && bt.equity_curve.length > 0) {
+          eqSeries.setData(bt.equity_curve);
+          eqChart.timeScale().fitContent();
+        }
 
-      if (data.signal.type !== 'WAIT') {
-        candleSeries.createPriceLine({ price: data.signal.entry, color: '#94a3b8', lineWidth: 1, lineStyle: 2, title: 'ENTRY' });
-        candleSeries.createPriceLine({ price: data.signal.sl, color: '#ef4444', lineWidth: 2, lineStyle: 0, title: 'SL' });
-        candleSeries.createPriceLine({ price: data.signal.be_trigger, color: '#f59e0b', lineWidth: 1, lineStyle: 1, title: 'BE+' });
-        candleSeries.createPriceLine({ price: data.signal.tp, color: '#10b981', lineWidth: 2, lineStyle: 0, title: 'TP' });
+        if (data.signal.type !== 'WAIT') {
+          candleSeries.createPriceLine({ price: data.signal.entry, color: '#94a3b8', lineWidth: 1, lineStyle: 2, title: 'ENTRY' });
+          candleSeries.createPriceLine({ price: data.signal.sl, color: '#ef4444', lineWidth: 2, lineStyle: 0, title: 'SL' });
+          candleSeries.createPriceLine({ price: data.signal.be_trigger, color: '#f59e0b', lineWidth: 1, lineStyle: 1, title: 'BE+' });
+          candleSeries.createPriceLine({ price: data.signal.tp, color: '#10b981', lineWidth: 2, lineStyle: 0, title: 'TP' });
+        }
+
+        const tbody = document.getElementById('trade-rows');
+        tbody.innerHTML = bt.recent_trades.map(t => `
+          <tr>
+            <td>${t.exit_str}</td>
+            <td class="${t.type === 'LONG' ? 'pos' : 'neg'}" style="font-weight:700;">${t.type}</td>
+            <td>$${t.entry}</td>
+            <td>$${t.exit}</td>
+            <td>${t.reason}</td>
+            <td class="${t.pnl >= 0 ? 'pos' : 'neg'}" style="font-weight:700;">${t.pnl >= 0 ? '+' : ''}$${t.pnl}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        errBox.style.display = 'block';
+        errBox.innerText = '⚠️ ข้อผิดพลาด: ' + err.message;
       }
-
-      const tbody = document.getElementById('trade-rows');
-      tbody.innerHTML = bt.recent_trades.map(t => `
-        <tr>
-          <td>${t.exit_str}</td>
-          <td class="${t.type === 'LONG' ? 'pos' : 'neg'}" style="font-weight:700;">${t.type}</td>
-          <td>$${t.entry}</td>
-          <td>$${t.exit}</td>
-          <td>${t.reason}</td>
-          <td class="${t.pnl >= 0 ? 'pos' : 'neg'}" style="font-weight:700;">${t.pnl >= 0 ? '+' : ''}$${t.pnl}</td>
-        </tr>
-      `).join('');
     }
     loadDashboard();
   </script>

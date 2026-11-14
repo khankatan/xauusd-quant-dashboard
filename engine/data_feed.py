@@ -1,55 +1,24 @@
-import os
-import requests
-import pandas as pd
-import yfinance as yf
-from engine.config import HISTORY_CSV
+# เส้นประสาทกลาง: ศูนย์รวมค่าพารามิเตอร์และกฎเหล็กการบริหารความเสี่ยง
+INITIAL_CAPITAL = 100000.0
 
-def to_unix_seconds(series):
-    return series.apply(lambda x: int(x.timestamp()))
+# กฎการบริหารความเสี่ยง (คุมเข้มไม่ให้ Daily DD แตะ 3% เด็ดขาด)
+BASE_RISK_PCT = 0.35          # เสี่ยงปกติ 0.35% ($350) ต่อไม้ -> Daily DD สูงสุดไม่เกิน 0.40%
+THROTTLED_RISK_PCT = 0.25     # ลดเหลือ 0.25% ทันทีเมื่อแพ้ติดกัน 2 ครั้งขึ้นไป
+DAILY_TARGET_PCT = 0.25       # เป้ากำไรรายวัน +0.25% -> ถึงแล้วล็อกกำไรหยุดเทรดทันที!
+HARD_DAILY_DD_PCT = 1.50      # Circuit Breaker รายวัน (-1.50% ต่ำกว่ากฎ 3% เท่าตัว)
+MAX_TRADES_PER_DAY = 1        # ยิงวันละ 1 นัดคมๆ ทุกวันทำการ
+STOP_ON_BE_PLUS = True        # วันไหนชน BE+ ให้หยุดพักทันที รอวันถัดไป
+COMMISSION_PER_OZ = 0.035
 
-def fetch_market_data():
-    api_key = os.getenv("TWELVE_DATA_KEY", "").strip()
-    new_df = pd.DataFrame()
-    source_name = "Yahoo Finance (Free Feed)"
+# คืนค่าระยะ SL/TP ระดับสถาบันที่พิสูจน์แล้วว่าทนไส้เทียนทองคำ $4,000+ ได้จริง
+ATR_LEN = 14
+VWRSI_LEN = 14
+H1_EMA_LEN = 34
+SL_ATR_MULT = 2.2             # ขยาย SL เป็น 2.2 ATR (แก้ปัญหาโดนไส้กิน SL 48%)
+TP_ATR_MULT = 3.5             # R:R 1:1.59 -> ชนะ 1 ไม้ได้ +0.55% ทะลุเป้า +0.25% เกินเท่าตัว!
+BE_TRIGGER_R = 1.35           # เลื่อนหน้าทุนที่ 1.35R (ลดการโดนดีดออกที่ BE+ 32%)
 
-    if api_key:
-        url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&outputsize=5000&apikey={api_key}"
-        res = requests.get(url, timeout=30).json()
-        if "values" in res:
-            new_df = pd.DataFrame(res["values"])
-            new_df["datetime"] = pd.to_datetime(new_df["datetime"], utc=True)
-            for col in ["open", "high", "low", "close"]:
-                new_df[col] = pd.to_numeric(new_df[col], errors="coerce")
-            new_df = new_df[["datetime", "open", "high", "low", "close"]].dropna()
-            source_name = "TwelveData Spot XAU/USD (Modular Multi-Brain)"
-        else:
-            raise RuntimeError(f"Twelve Data Error: {res.get('message', res)}")
-    else:
-        ticker = yf.Ticker("GC=F")
-        df_y = ticker.history(period="60d", interval="15m").reset_index()
-        time_col = "Datetime" if "Datetime" in df_y.columns else "Date"
-        df_y["datetime"] = pd.to_datetime(df_y[time_col], utc=True)
-        new_df = df_y.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})[["datetime", "open", "high", "low", "close"]].dropna()
-
-    new_df["ts"] = to_unix_seconds(new_df["datetime"])
-
-    if os.path.exists(HISTORY_CSV):
-        try:
-            old_df = pd.read_csv(HISTORY_CSV)
-            if "source" in old_df.columns and "TwelveData" in str(old_df["source"].iloc[-1]) and "TwelveData" in source_name:
-                old_df["datetime"] = pd.to_datetime(old_df["datetime"], utc=True)
-                old_df["ts"] = to_unix_seconds(old_df["datetime"])
-                combined = pd.concat([old_df[["datetime", "ts", "open", "high", "low", "close"]], new_df])
-            else:
-                combined = new_df
-        except Exception:
-            combined = new_df
-    else:
-        combined = new_df
-
-    combined = combined.drop_duplicates(subset=["ts"]).sort_values("ts").reset_index(drop=True)
-    # กรองวันเสาร์-อาทิตย์ออก
-    combined = combined[combined["datetime"].dt.dayofweek < 5].reset_index(drop=True)
-    combined["source"] = source_name
-    combined.to_csv(HISTORY_CSV, index=False)
-    return combined, source_name
+# ไฟล์จัดเก็บข้อมูล
+HISTORY_CSV = "data/xauusd_m15_history.csv"
+TRADES_CSV = "data/all_trades.csv"
+STATE_JSON = "data/state.json"

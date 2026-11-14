@@ -87,9 +87,9 @@ class RiskGuard:
         self.trades_today += 1
         conv_tag = "+OI" if is_macro_conv else ""
 
-        if direction == "LONG":
+        if direction == "BUY":
             return {
-                "type": "LONG", "agent": agent_tag, "conv": conv_tag, "risk_pct": risk_pct,
+                "type": "BUY", "agent": agent_tag, "conv": conv_tag, "risk_pct": risk_pct,
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
@@ -98,7 +98,7 @@ class RiskGuard:
             }
         else:
             return {
-                "type": "SHORT", "agent": agent_tag, "conv": conv_tag, "risk_pct": risk_pct,
+                "type": "SELL", "agent": agent_tag, "conv": conv_tag, "risk_pct": risk_pct,
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,

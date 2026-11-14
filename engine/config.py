@@ -6,10 +6,11 @@ BASE_RISK_PCT = 0.35          # เสี่ยงมาตรฐาน 0.35% ($
 CONVICTION_RISK_PCT = 0.50    # เพิ่ม Risk เป็น 0.50% ($500) ในวันที่ OI/Volume และ DXY ยืนยันเทรนด์จริง
 THROTTLED_RISK_PCT = 0.25     # ลดเหลือ 0.30% ($300) เมื่อแพ้ติดกัน 2 ครั้งขึ้นไป (คุม Daily DD ต่ำกว่า 0.55%)
 
+HOUSE_MONEY_MODE = True       # เปิดโหมดยิงต่อเมื่อชนะ TP
 DAILY_TARGET_PCT = 0.25       # เป้ากำไรรายวัน +0.25% -> ถึงแล้วล็อกกำไรหยุดเทรดทันที!
 HARD_DAILY_DD_PCT = 2.00      # Circuit Breaker รายวัน (-2.00% คุมเข้มไม่ให้แตะเพดาน 3.00% เด็ดขาด)
 MAX_OVERALL_DD_LIMIT = 10.00  # เพดานขาดทุนรวม FTMO 10% จากเงินต้น ($100,000 -> ห้ามต่ำกว่า $90,000)
-MAX_TRADES_PER_DAY = 1        # ยิงวันละ 1 นัดคมๆ ทุกวันทำการ
+MAX_TRADES_PER_DAY = 3        # ยิงวันละ 3 นัดคมๆ ทุกวันทำการ
 STOP_ON_BE_PLUS = True        # วันไหนชน BE+ ให้หยุดพักทันที รอวันถัดไป
 COMMISSION_PER_OZ = 0.035
 

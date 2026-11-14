@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>XAUUSD Institutional Multi-Brain Quant Terminal</title>
+  <title>XAUUSD CFD Multi-Brain Quant Terminal</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -61,7 +61,7 @@
         <div>
           <div class="flex items-center gap-2.5">
             <h1 class="text-xl md:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-100 to-sky-300 bg-clip-text text-transparent">
-              XAUUSD MULTI-BRAIN QUANT TERMINAL
+              XAUUSD CFD MULTI-BRAIN QUANT TERMINAL
             </h1>
             <span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span> LIVE ENGINE
@@ -76,7 +76,7 @@
           REGIME: LOADING...
         </div>
         <div class="px-4 py-2 rounded-xl bg-slate-900/90 border border-amber-500/30 text-right">
-          <div class="text-[10px] uppercase tracking-wider text-slate-400">XAU/USD SPOT</div>
+          <div class="text-[10px] uppercase tracking-wider text-slate-400">XAU/USD CFD SPOT</div>
           <div id="spot-price" class="text-lg font-extrabold text-amber-400 mono">$0.00</div>
         </div>
       </div>
@@ -157,21 +157,21 @@
         <h2 class="text-sm font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-sky-400"></span> ผลงานแยกตามสมองย่อย & ตัวกรองมหภาค (Multi-Brain Attribution)
         </h2>
-        <span class="text-xs text-slate-400">Dynamic Risk: 0.35% ปกติ | 0.50% เมื่อ OI+DXY ยืนยัน</span>
+        <span class="text-xs text-slate-400">CFD Risk: 0.35% ปกติ | 0.50% เมื่อ OI+DXY ยืนยัน | 0.25% ช่วงลดความเสี่ยง</span>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="agent-cards">
         <!-- Populated dynamically by JS -->
       </div>
     </div>
 
-    <!-- Row 3: Live Signal + Equity Curve + Candlestick Chart -->
+    <!-- Row 3: Live Signal + Equity Curve -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
       <!-- Live Signal Execution Panel -->
       <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
         <div>
           <div class="flex items-center justify-between">
-            <span class="text-xs font-extrabold uppercase tracking-wider text-slate-400">LIVE ACTION SIGNAL</span>
+            <span class="text-xs font-extrabold uppercase tracking-wider text-slate-400">LIVE CFD SIGNAL</span>
             <span id="sig-agent" class="text-xs font-bold px-2.5 py-0.5 rounded-md bg-slate-800 text-sky-300 mono">SCANNING</span>
           </div>
           <div id="sig-badge" class="mt-4 py-4 rounded-xl text-center font-extrabold text-2xl tracking-wider bg-slate-900/90 border border-slate-700 text-slate-300 mono">
@@ -191,7 +191,7 @@
               <span id="sig-tp" class="font-bold text-emerald-400">-</span>
             </div>
             <div class="flex justify-between p-2.5 rounded-lg bg-slate-900/70">
-              <span class="text-slate-400">BREAKEVEN+ TRIGGER</span>
+              <span class="text-slate-400">BREAKEVEN+ (1.35R)</span>
               <span id="sig-be" class="font-bold text-amber-300">-</span>
             </div>
           </div>
@@ -207,8 +207,8 @@
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-sm font-extrabold uppercase tracking-wider text-slate-300">พอร์ตจำลอง FTMO $100,000 (Equity Growth Curve)</h3>
           <div class="flex gap-3 text-xs mono">
-            <span id="long-pnl-tag" class="text-emerald-400 font-bold">LONG: +$0</span>
-            <span id="short-pnl-tag" class="text-sky-400 font-bold">SHORT: +$0</span>
+            <span id="buy-pnl-tag" class="text-emerald-400 font-bold">BUY: +$0</span>
+            <span id="sell-pnl-tag" class="text-rose-400 font-bold">SELL: +$0</span>
           </div>
         </div>
         <div id="equity-chart" class="w-full h-64"></div>
@@ -224,7 +224,7 @@
 
       <div class="glass-card rounded-2xl p-5 lg:col-span-6 overflow-hidden flex flex-col">
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-extrabold uppercase tracking-wider text-slate-300">ประวัติการออกไม้ล่าสุด (Recent Trades)</h3>
+          <h3 class="text-sm font-extrabold uppercase tracking-wider text-slate-300">ประวัติการออกไม้ล่าสุด (Recent CFD Trades)</h3>
           <a href="data/all_trades.csv" download class="text-xs font-bold px-3 py-1 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition">
             ดาวน์โหลด CSV
           </a>
@@ -234,7 +234,7 @@
             <thead>
               <tr class="border-b border-slate-800 text-slate-400">
                 <th class="py-2 px-2">เวลาเข้า (UTC)</th>
-                <th class="py-2 px-2">ฝั่ง</th>
+                <th class="py-2 px-2">คำสั่ง</th>
                 <th class="py-2 px-2">เข้า / ออก</th>
                 <th class="py-2 px-2">สมอง / สถานะ</th>
                 <th class="py-2 px-2 text-right">กำไร/ขาดทุน</th>
@@ -288,13 +288,13 @@
         document.getElementById('win-rate').textContent = `WR ${bt.win_rate.toFixed(1)}%`;
         document.getElementById('trade-coverage').textContent = `${bt.total_trades} / ${bt.total_bdays || 36} วัน`;
 
-        // Sub-Brain Cards
+        // Sub-Brain Cards (ข้อความอัปเดตตรงกับโค้ด V7.3 ล่าสุด)
         const ag = bt.agents || {};
         const brains = [
           { key: 'VWAP_PB', title: 'สมอง 1: VWAP Pullback', desc: 'ย่อทดสอบเส้น Session VWAP ตามเทรนด์ H1', accent: 'sky' },
-          { key: 'EV_PB', title: 'สมอง 2: Evening Pulse', desc: 'จับแรงส่งช่วงค่ำ (18:15–21:30 น.)', accent: 'emerald' },
-          { key: 'OI_BOOSTED', title: 'พลังเสริม: COMEX OI + DXY', desc: 'ไม้ที่อัด Risk 0.50% เมื่อ OI ยืนยันเทรนด์', accent: 'amber' },
-          { key: 'ROLLOVER', title: 'ระบบปิดก่อน Rollover', desc: 'ตัดจบอัตโนมัติ 02:30 น. ป้องกันสเปรดถ่าง', accent: 'purple' }
+          { key: 'EV_PB', title: 'สมอง 2: Evening Pulse', desc: 'จับแรงส่งช่วงค่ำ (18:15–21:30 น.) + OI', accent: 'emerald' },
+          { key: 'OI_BOOSTED', title: 'พลังเสริม: COMEX OI + DXY', desc: 'อัด Risk 0.50% (VWAP-PB & EV-PB) เมื่อ OI ยืนยัน', accent: 'amber' },
+          { key: 'ROLLOVER', title: 'เกราะปิด 03:00 น. & ศุกร์', desc: 'ปิดก่อน Rollover 03:00 น. และคืนศุกร์ก่อนตลาดปิด', accent: 'purple' }
         ];
 
         const agentContainer = document.getElementById('agent-cards');
@@ -316,15 +316,15 @@
           `;
         }).join('');
 
-        // Signal Card
+        // Signal Card (BUY / SELL สำหรับ CFD)
         const sig = data.signal;
         const badge = document.getElementById('sig-badge');
         document.getElementById('sig-agent').textContent = sig.agent || 'SCANNING';
-        if (sig.type === 'LONG') {
-          badge.textContent = 'BUY / LONG';
+        if (sig.type === 'BUY') {
+          badge.textContent = 'BUY XAUUSD';
           badge.className = 'mt-4 py-4 rounded-xl text-center font-extrabold text-2xl tracking-wider bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 mono';
-        } else if (sig.type === 'SHORT') {
-          badge.textContent = 'SELL / SHORT';
+        } else if (sig.type === 'SELL') {
+          badge.textContent = 'SELL XAUUSD';
           badge.className = 'mt-4 py-4 rounded-xl text-center font-extrabold text-2xl tracking-wider bg-rose-500/20 border border-rose-500/50 text-rose-400 mono';
         }
         document.getElementById('sig-entry').textContent = sig.entry ? `$${sig.entry}` : '-';
@@ -333,17 +333,20 @@
         document.getElementById('sig-be').textContent = sig.be_trigger ? `$${sig.be_trigger}` : '-';
         document.getElementById('sig-lot').textContent = `${sig.lot_size} Lots (${sig.risk_pct || 0.35}%)`;
 
-        document.getElementById('long-pnl-tag').textContent = `LONG: ${fmtMoney(bt.long_pnl)}`;
-        document.getElementById('short-pnl-tag').textContent = `SHORT: ${fmtMoney(bt.short_pnl)}`;
+        const buyVal = bt.buy_pnl !== undefined ? bt.buy_pnl : (bt.long_pnl || 0);
+        const sellVal = bt.sell_pnl !== undefined ? bt.sell_pnl : (bt.short_pnl || 0);
+        document.getElementById('buy-pnl-tag').textContent = `BUY: ${fmtMoney(buyVal)}`;
+        document.getElementById('sell-pnl-tag').textContent = `SELL: ${fmtMoney(sellVal)}`;
 
-        // Recent Trades Table
+        // Recent Trades Table (แสดง BUY / SELL)
         const tbody = document.getElementById('trades-tbody');
         tbody.innerHTML = (bt.recent_trades || []).map(t => {
           const isWin = t.pnl >= 0;
+          const sideLabel = t.type === 'LONG' ? 'BUY' : (t.type === 'SHORT' ? 'SELL' : t.type);
           return `
             <tr class="hover:bg-slate-800/40 transition">
               <td class="py-2 px-2 text-slate-300">${t.entry_str.slice(5)}</td>
-              <td class="py-2 px-2 font-bold ${t.type === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}">${t.type}</td>
+              <td class="py-2 px-2 font-bold ${sideLabel === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}">${sideLabel}</td>
               <td class="py-2 px-2 text-slate-300">${t.entry} → ${t.exit}</td>
               <td class="py-2 px-2"><span class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[11px]">${t.reason}</span></td>
               <td class="py-2 px-2 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}">${fmtMoney(t.pnl)}</td>

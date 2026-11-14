@@ -9,19 +9,16 @@ from datetime import datetime, timezone
 
 INITIAL_CAPITAL = 100000.0
 RISK_PER_TRADE_PCT = 0.25     # เสี่ยงคงที่ 0.25% ต่อไม้
-DAILY_TARGET_PCT = 0.25       # กำไรถึง +0.25% ของวัน -> ล็อกกำไรหยุดเทรดทันที
-MAX_TRADES_PER_DAY = 2        # จำกัดไม่เกิน 2 ไม้/วัน (คุมความเสี่ยงสูงสุดไม่เกิน -0.50%/วัน)
+DAILY_TARGET_PCT = 0.25       # กำไรถึง +0.25% ของวัน -> หยุดทันที รอวันถัดไป
+MAX_TRADES_PER_DAY = 2        # จำกัดไม่เกิน 2 ไม้/วัน
 COMMISSION_PER_OZ = 0.035
 
-# พารามิเตอร์ตรวจจับสภาวะตลาด (Regime Detection)
-H1_EMA_LEN = 34
-H1_ADX_THRESHOLD = 22.0       # ADX > 22 = โหมดเทรนด์ | ADX <= 22 = โหมดไซด์เวย์
-
-# พารามิเตอร์โหมด Trend & Sideways
-M15_BREAKOUT_LEN = 12
-BB_LEN = 20
-BB_STD = 2.0
+SWING_LOOKBACK = 16           # กรอบ High/Low ย้อนหลัง 4 ชั่วโมง (16 แท่ง M15) สำหรับจับ Liquidity Sweep
+VWRSI_LEN = 14
 ATR_LEN = 14
+SL_ATR_MULT = 2.5             # SL กว้างพ้นระยะไส้เทียนสะบัดของทองคำ $4,000+
+TP_ATR_MULT = 3.2             # TP 3.2 ATR -> ชนะ 1 ไม้ได้ ~+0.32% ทะลุเป้า +0.25% ของวันทันที!
+BE_TRIGGER_R = 1.1
 
 os.makedirs("data", exist_ok=True)
 HISTORY_CSV = "data/xauusd_m15_history.csv"
@@ -44,7 +41,7 @@ def fetch_and_store_history():
             for col in ["open", "high", "low", "close"]:
                 new_df[col] = pd.to_numeric(new_df[col], errors="coerce")
             new_df = new_df[["datetime", "open", "high", "low", "close"]].dropna()
-            source_name = "TwelveData Spot XAU/USD (Dual-Regime)"
+            source_name = "TwelveData Spot XAU/USD (V7 Liquidity Sweep + VWAP)"
         else:
             raise RuntimeError(f"Twelve Data Error: {res.get('message', res)}")
     else:
@@ -78,65 +75,46 @@ def fetch_and_store_history():
 
 def is_clean_thai_session(utc_dt):
     thai_hour = (utc_dt.hour + 7) % 24
-    # ตัดเฉพาะช่วง 02:00-07:59 น. (ตลาดปิด/เปิดเอเชีย) และ 20:00-20:59 น. (ข่าวผันผวนแรง)
-    if (2 <= thai_hour <= 7) or (thai_hour == 20):
+    # ตัดเฉพาะช่วง 02:00-07:59 น. (ตลาดปิด/เปิดเอเชีย)
+    if 2 <= thai_hour <= 7:
         return False
     return True
 
-def calc_adx(df_h, period=14):
-    high, low, close = df_h["high"], df_h["low"], df_h["close"]
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = (-low.diff()).clip(lower=0)
-    plus_dm = np.where(plus_dm > minus_dm, plus_dm, 0.0)
-    minus_dm = np.where(minus_dm > plus_dm, minus_dm, 0.0)
-
-    tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
-    plus_di = 100 * (pd.Series(plus_dm, index=df_h.index).ewm(alpha=1/period, adjust=False).mean() / atr.replace(0, np.nan))
-    minus_di = 100 * (pd.Series(minus_dm, index=df_h.index).ewm(alpha=1/period, adjust=False).mean() / atr.replace(0, np.nan))
-    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
-    return dx.ewm(alpha=1/period, adjust=False).mean()
-
-def build_dual_regime_features(df):
+def build_institutional_features(df):
     df = df.copy()
-    # 1. สร้างแท่งเทียน H1 เพื่อตรวจจับสภาวะตลาด (Regime)
-    df_h1 = df.set_index("datetime").resample("1h").agg({
-        "open": "first", "high": "max", "low": "min", "close": "last"
-    }).dropna()
+    # 1. คำนวณ Synthetic Tick Volume จากช่วงการวิ่งของแท่งเทียน (ใช้แทน Volume จริงสำหรับ Spot FX)
+    df["tick_vol"] = (df["high"] - df["low"]).replace(0, 0.01)
+    df["typical_price"] = (df["high"] + df["low"] + df["close"]) / 3.0
 
-    df_h1["h1_ema"] = df_h1["close"].ewm(span=H1_EMA_LEN, adjust=False).mean()
-    df_h1["h1_adx"] = calc_adx(df_h1, 14)
+    # 2. Session VWAP รายวัน (รีเซ็ตทุกวันทำการ) + VWAP Standard Deviation
+    df["session_date"] = df["datetime"].dt.date
+    df["pv"] = df["typical_price"] * df["tick_vol"]
+    df["cum_pv"] = df.groupby("session_date")["pv"].cumsum()
+    df["cum_vol"] = df.groupby("session_date")["tick_vol"].cumsum()
+    df["vwap"] = df["cum_pv"] / df["cum_vol"]
 
-    delta_h1 = df_h1["close"].diff()
-    gain_h1 = delta_h1.clip(lower=0).rolling(14).mean()
-    loss_h1 = (-delta_h1.clip(upper=0)).rolling(14).mean()
-    df_h1["h1_rsi"] = 100 - (100 / (1 + (gain_h1 / loss_h1.replace(0, np.nan))))
+    df["vwap_diff_sq"] = ((df["typical_price"] - df["vwap"]) ** 2) * df["tick_vol"]
+    df["vwap_std"] = np.sqrt(df.groupby("session_date")["vwap_diff_sq"].cumsum() / df["cum_vol"])
+    df["vwap_upper"] = df["vwap"] + (1.5 * df["vwap_std"])
+    df["vwap_lower"] = df["vwap"] - (1.5 * df["vwap_std"])
 
-    # เลื่อนข้อมูล H1 ไป 1 แท่งเต็ม (ใช้เฉพาะแท่ง H1 ที่ปิดสมบูรณ์แล้ว 100%)
-    df_h1_shifted = df_h1[["close", "h1_ema", "h1_adx", "h1_rsi"]].shift(1).rename(columns={"close": "h1_close"})
-    df["h1_bucket"] = df["datetime"].dt.floor("1h")
-    df = df.merge(df_h1_shifted, left_on="h1_bucket", right_index=True, how="left")
+    # 3. Volume-Weighted RSI (VWRSI 14)
+    delta = df["close"].diff()
+    up_vol = delta.clip(lower=0) * df["tick_vol"]
+    down_vol = (-delta.clip(upper=0)) * df["tick_vol"]
+    avg_up = up_vol.ewm(alpha=1/VWRSI_LEN, adjust=False).mean()
+    avg_down = down_vol.ewm(alpha=1/VWRSI_LEN, adjust=False).mean()
+    rs = avg_up / avg_down.replace(0, np.nan)
+    df["vwrsi"] = 100 - (100 / (1 + rs))
 
-    # 2. Indicator บน M15 สำหรับโหมด Trend & Sideways
+    # 4. กรอบสภาพคล่อง (Swing High / Swing Low 16 แท่ง = 4 ชม.)
+    df["swing_high"] = df["high"].rolling(SWING_LOOKBACK).max().shift(1)
+    df["swing_low"] = df["low"].rolling(SWING_LOOKBACK).min().shift(1)
+
+    # 5. ATR (14) และ Z-Score สำหรับ Dashboard
     tr = pd.concat([df["high"] - df["low"], (df["high"] - df["close"].shift(1)).abs(), (df["low"] - df["close"].shift(1)).abs()], axis=1).max(axis=1)
     df["atr"] = tr.rolling(ATR_LEN).mean()
 
-    # โหมด Trend: กรอบ Breakout 12 แท่ง
-    df["donchian_high"] = df["high"].rolling(M15_BREAKOUT_LEN).max().shift(1)
-    df["donchian_low"] = df["low"].rolling(M15_BREAKOUT_LEN).min().shift(1)
-
-    # โหมด Sideways: Bollinger Bands (20, 2.0) + M15 RSI (14)
-    df["bb_mid"] = df["close"].rolling(BB_LEN).mean()
-    bb_std = df["close"].rolling(BB_LEN).std()
-    df["bb_upper"] = df["bb_mid"] + (BB_STD * bb_std)
-    df["bb_lower"] = df["bb_mid"] - (BB_STD * bb_std)
-
-    delta_m15 = df["close"].diff()
-    gain_m15 = delta_m15.clip(lower=0).rolling(14).mean()
-    loss_m15 = (-delta_m15.clip(upper=0)).rolling(14).mean()
-    df["m15_rsi"] = 100 - (100 / (1 + (gain_m15 / loss_m15.replace(0, np.nan))))
-
-    # Z-Score สำหรับ Dashboard
     m100 = df["close"].rolling(100).mean()
     s100 = df["close"].rolling(100).std()
     df["macro_z"] = (df["close"] - m100) / s100.replace(0, np.nan)
@@ -147,7 +125,7 @@ def build_dual_regime_features(df):
     return df
 
 def run_quant_backtest(df, source_name):
-    df = build_dual_regime_features(df)
+    df = build_institutional_features(df)
 
     equity = INITIAL_CAPITAL
     peak_equity = INITIAL_CAPITAL
@@ -163,11 +141,11 @@ def run_quant_backtest(df, source_name):
     closed_trades = []
     equity_curve = []
 
-    start_idx = 150
+    start_idx = 110
     for i in range(start_idx, len(df) - 1):
         bar = df.iloc[i]
         prev = df.iloc[i - 1]
-        if pd.isna(bar["h1_adx"]) or pd.isna(bar["atr"]) or pd.isna(bar["bb_upper"]) or pd.isna(bar["m15_rsi"]):
+        if pd.isna(bar["vwap"]) or pd.isna(bar["vwrsi"]) or pd.isna(bar["atr"]) or pd.isna(bar["swing_high"]):
             continue
 
         dt = bar["datetime"]
@@ -191,10 +169,10 @@ def run_quant_backtest(df, source_name):
                     pos["is_be"] = True
                 if bar["low"] <= pos["sl"]:
                     exit_price = pos["sl"]
-                    exit_reason = f"{pos['mode']}-BE+" if pos["is_be"] else f"{pos['mode']}-SL"
+                    exit_reason = "BE+" if pos["is_be"] else "SL"
                 elif bar["high"] >= pos["tp"]:
                     exit_price = pos["tp"]
-                    exit_reason = f"{pos['mode']}-TP"
+                    exit_reason = "TP"
                 elif thai_dt.hour == 2 and thai_dt.minute >= 30:
                     exit_price = float(bar["close"])
                     exit_reason = "Rollover"
@@ -217,10 +195,10 @@ def run_quant_backtest(df, source_name):
                     pos["is_be"] = True
                 if bar["high"] >= pos["sl"]:
                     exit_price = pos["sl"]
-                    exit_reason = f"{pos['mode']}-BE+" if pos["is_be"] else f"{pos['mode']}-SL"
+                    exit_reason = "BE+" if pos["is_be"] else "SL"
                 elif bar["low"] <= pos["tp"]:
                     exit_price = pos["tp"]
-                    exit_reason = f"{pos['mode']}-TP"
+                    exit_reason = "TP"
                 elif thai_dt.hour == 2 and thai_dt.minute >= 30:
                     exit_price = float(bar["close"])
                     exit_reason = "Rollover"
@@ -247,60 +225,44 @@ def run_quant_backtest(df, source_name):
 
         if pos is None and (not today_target_logged) and (trades_today < MAX_TRADES_PER_DAY):
             if is_clean_thai_session(dt):
-                is_trend_regime = bar["h1_adx"] > H1_ADX_THRESHOLD
+                # === สัญญาณ Institutional Liquidity Sweep + VWAP Reversion + VWRSI ===
+                # 1) Bullish Liquidity Sweep: ราคาแทงไส้หลุด Swing Low เดิม (กวาด SL ฝั่งซื้อ) + อยู่ต่ำกว่า VWAP Lower Band
+                #    แล้วดึงกลับขึ้นมาปิดเหนือ Swing Low เดิมเป็นแท่งเขียว + VWRSI ดีดกลับจากโซนขายมากเกินไป (< 40)
+                bull_sweep = (bar["low"] < bar["swing_low"]) and (bar["close"] > bar["swing_low"]) and (bar["close"] > bar["open"])
+                bull_vwap_vwrsi = (bar["low"] <= bar["vwap_lower"]) and (bar["vwrsi"] < 42) and (bar["vwrsi"] > prev["vwrsi"])
+
+                # 2) Bearish Liquidity Sweep: ราคาแทงไส้ทะลุ Swing High เดิม (กวาด SL ฝั่งขาย) + อยู่เหนือ VWAP Upper Band
+                #    แล้วถูกตบกลับลงมาปิดใต้ Swing High เดิมเป็นแท่งแดง + VWRSI หักหัวลงจากโซนซื้อมากเกินไป (> 60)
+                bear_sweep = (bar["high"] > bar["swing_high"]) and (bar["close"] < bar["swing_high"]) and (bar["close"] < bar["open"])
+                bear_vwap_vwrsi = (bar["high"] >= bar["vwap_upper"]) and (bar["vwrsi"] > 58) and (bar["vwrsi"] < prev["vwrsi"])
+
+                long_sig = bull_sweep and bull_vwap_vwrsi
+                short_sig = bear_sweep and bear_vwap_vwrsi
+
                 atr_val = float(bar["atr"])
+                sl_dist = atr_val * SL_ATR_MULT
+                tp_dist = atr_val * TP_ATR_MULT
                 risk_cash = equity * (RISK_PER_TRADE_PCT / 100.0)
                 entry_p = float(bar["close"])
 
-                sig_dir = None
-                mode_name = ""
-                sl_dist = 0.0
-                tp_dist = 0.0
-                be_r = 1.5
-
-                if is_trend_regime:
-                    # === โหมด 1: TREND MODE (H1 Trend + M15 Breakout) ===
-                    mode_name = "TREND"
-                    h1_bull = (bar["h1_close"] > bar["h1_ema"]) and (bar["h1_rsi"] > 52)
-                    h1_bear = (bar["h1_close"] < bar["h1_ema"]) and (bar["h1_rsi"] < 48)
-                    if h1_bull and (bar["close"] > bar["donchian_high"]) and (bar["close"] > bar["open"]):
-                        sig_dir = "LONG"
-                    elif h1_bear and (bar["close"] < bar["donchian_low"]) and (bar["close"] < bar["open"]):
-                        sig_dir = "SHORT"
-                    sl_dist = atr_val * 2.0
-                    tp_dist = atr_val * 4.0
-                    be_r = 1.5
-                else:
-                    # === โหมด 2: SIDEWAYS MODE (BB Mean-Reversion + RSI Divergence/Reversal) ===
-                    mode_name = "RANGE"
-                    # ราคาลงไปแตะ/หลุดกรอบล่าง BB แล้วกลับตัวปิดแท่งเขียว + RSI Oversold (< 35)
-                    if (prev["low"] <= prev["bb_lower"] or bar["low"] <= bar["bb_lower"]) and (prev["m15_rsi"] < 35) and (bar["close"] > bar["open"]):
-                        sig_dir = "LONG"
-                    # ราคาพุ่งไปแตะ/ทะลุกรอบบน BB แล้วกลับตัวปิดแท่งแดง + RSI Overbought (> 65)
-                    elif (prev["high"] >= prev["bb_upper"] or bar["high"] >= bar["bb_upper"]) and (prev["m15_rsi"] > 65) and (bar["close"] < bar["open"]):
-                        sig_dir = "SHORT"
-                    sl_dist = atr_val * 1.6
-                    tp_dist = atr_val * 2.2
-                    be_r = 1.1
-
-                if sig_dir is not None and sl_dist > 0:
+                if sl_dist > 0 and (long_sig or short_sig):
                     oz = risk_cash / sl_dist
                     comm = oz * COMMISSION_PER_OZ * 2
                     trades_today += 1
-                    if sig_dir == "LONG":
+                    if long_sig:
                         pos = {
-                            "type": "LONG", "mode": mode_name, "entry": entry_p, "entry_time": now_ts,
+                            "type": "LONG", "entry": entry_p, "entry_time": now_ts,
                             "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                             "sl": entry_p - sl_dist, "tp": entry_p + tp_dist,
-                            "be_trigger": entry_p + (sl_dist * be_r),
+                            "be_trigger": entry_p + (sl_dist * BE_TRIGGER_R),
                             "oz": oz, "comm": comm, "atr": atr_val, "is_be": False
                         }
                     else:
                         pos = {
-                            "type": "SHORT", "mode": mode_name, "entry": entry_p, "entry_time": now_ts,
+                            "type": "SHORT", "entry": entry_p, "entry_time": now_ts,
                             "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                             "sl": entry_p + sl_dist, "tp": entry_p - tp_dist,
-                            "be_trigger": entry_p - (sl_dist * be_r),
+                            "be_trigger": entry_p - (sl_dist * BE_TRIGGER_R),
                             "oz": oz, "comm": comm, "atr": atr_val, "is_be": False
                         }
 
@@ -322,33 +284,26 @@ def run_quant_backtest(df, source_name):
     net_pnl = equity - INITIAL_CAPITAL
     net_pnl_pct = (net_pnl / INITIAL_CAPITAL) * 100.0
 
-    # สถานะปัจจุบัน (Live Signal)
     curr = df.iloc[-2]
     prev = df.iloc[-3]
-    is_trend_now = (curr["h1_adx"] > H1_ADX_THRESHOLD) if not pd.isna(curr["h1_adx"]) else False
     in_sess_now = is_clean_thai_session(curr["datetime"])
 
     sig_type = "WAIT"
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
-    sl_d = atr_now * (2.0 if is_trend_now else 1.6)
-    tp_d = atr_now * (4.0 if is_trend_now else 2.2)
-    be_r_now = 1.5 if is_trend_now else 1.1
+    sl_d = atr_now * SL_ATR_MULT
+    tp_d = atr_now * TP_ATR_MULT
     lot_now = round((equity * (RISK_PER_TRADE_PCT / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
 
-    if in_sess_now:
-        if is_trend_now:
-            h1_bull_now = (curr["h1_close"] > curr["h1_ema"]) and (curr["h1_rsi"] > 52)
-            h1_bear_now = (curr["h1_close"] < curr["h1_ema"]) and (curr["h1_rsi"] < 48)
-            if h1_bull_now and (curr["close"] > curr["donchian_high"]) and (curr["close"] > curr["open"]):
-                sig_type = "LONG"
-            elif h1_bear_now and (curr["close"] < curr["donchian_low"]) and (curr["close"] < curr["open"]):
-                sig_type = "SHORT"
-        else:
-            if (prev["low"] <= prev["bb_lower"] or curr["low"] <= curr["bb_lower"]) and (prev["m15_rsi"] < 35) and (curr["close"] > curr["open"]):
-                sig_type = "LONG"
-            elif (prev["high"] >= prev["bb_upper"] or curr["high"] >= curr["bb_upper"]) and (prev["m15_rsi"] > 65) and (curr["close"] < curr["open"]):
-                sig_type = "SHORT"
+    if in_sess_now and not pd.isna(curr["swing_low"]):
+        bull_s = (curr["low"] < curr["swing_low"]) and (curr["close"] > curr["swing_low"]) and (curr["close"] > curr["open"])
+        bull_v = (curr["low"] <= curr["vwap_lower"]) and (curr["vwrsi"] < 42) and (curr["vwrsi"] > prev["vwrsi"])
+        bear_s = (curr["high"] > curr["swing_high"]) and (curr["close"] < curr["swing_high"]) and (curr["close"] < curr["open"])
+        bear_v = (curr["high"] >= curr["vwap_upper"]) and (curr["vwrsi"] > 58) and (curr["vwrsi"] < prev["vwrsi"])
+        if bull_s and bull_v:
+            sig_type = "LONG"
+        elif bear_s and bear_v:
+            sig_type = "SHORT"
 
     candles = [
         {"time": int(r["ts"]), "open": round(float(r["open"]), 2), "high": round(float(r["high"]), 2), "low": round(float(r["low"]), 2), "close": round(float(r["close"]), 2)}
@@ -358,7 +313,7 @@ def run_quant_backtest(df, source_name):
     def clean_num(val):
         return 0.0 if (val is None or (isinstance(val, float) and math.isnan(val))) else round(float(val), 3)
 
-    regime_label = f"TREND (ADX {round(float(curr['h1_adx']),1)})" if is_trend_now else f"SIDEWAYS (ADX {round(float(curr['h1_adx']),1)})"
+    regime_label = f"VWAP ${round(float(curr['vwap']), 1)} | VWRSI {round(float(curr['vwrsi']), 1)}" if not pd.isna(curr["vwap"]) else "VWAP ACTIVE"
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -374,7 +329,7 @@ def run_quant_backtest(df, source_name):
             "entry": round(entry_now, 2) if sig_type != "WAIT" else None,
             "sl": round(entry_now - sl_d if sig_type == "LONG" else entry_now + sl_d, 2) if sig_type != "WAIT" else None,
             "tp": round(entry_now + tp_d if sig_type == "LONG" else entry_now - tp_d, 2) if sig_type != "WAIT" else None,
-            "be_trigger": round(entry_now + sl_d * be_r_now if sig_type == "LONG" else entry_now - sl_d * be_r_now, 2) if sig_type != "WAIT" else None,
+            "be_trigger": round(entry_now + sl_d * BE_TRIGGER_R if sig_type == "LONG" else entry_now - sl_d * BE_TRIGGER_R, 2) if sig_type != "WAIT" else None,
             "lot_size": lot_now
         },
         "backtest": {
@@ -399,4 +354,4 @@ if __name__ == "__main__":
     state = run_quant_backtest(df, source_name)
     with open("data/state.json", "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
-    print(f"Dual-Regime V6 Complete | Bars: {len(df)} | Trades: {state['backtest']['total_trades']} | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']}")
+    print(f"V7 Institutional Complete | Bars: {len(df)} | Trades: {state['backtest']['total_trades']} | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']}")

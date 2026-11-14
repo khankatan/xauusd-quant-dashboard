@@ -13,15 +13,14 @@ MAX_OVERALL_DD_LIMIT = 10.00
 STOP_ON_BE_PLUS = True
 COMMISSION_PER_OZ = 0.035
 
-# พารามิเตอร์ระยะ SL / TP / 2-Stage Trailing to BE+
+# คืนค่า BE_TRIGGER_R = 1.35 เพื่อไม่ตัดไม้ TP ก้อนใหญ่ทิ้งกลางทาง
 ATR_LEN = 14
 VWRSI_LEN = 14
 H1_EMA_LEN = 34
 SL_ATR_MULT = 2.2
 TP_ATR_MULT = 3.5
-BE_TRIGGER_R = 0.85           # ระยะที่ 1: วิ่งบวก 0.85R -> เลื่อน SL มาล็อกหน้าทุน BE+ ทันที!
-TRAIL_START_R = 1.20          # ระยะที่ 2: วิ่งบวกเกิน 1.20R -> เริ่มลาก Trailing Stop ตามราคา
-TRAIL_DIST_ATR = 1.40         # ระยะห่าง Trailing Stop 1.40 ATR จากจุดสูงสุด/ต่ำสุด
+BE_TRIGGER_R = 1.35           # ปกติ: วิ่งบวก 1.35R ค่อยย้าย SL มาล็อกหน้าทุน BE+
+LATE_BE_TRIGGER_R = 0.65      # หลัง 23:30 น. ไทย: หากไม้ค้างดึกเคยบวก 0.65R ให้ล็อก BE+ กันไหลกลับก่อน 03:00 น.
 
 HISTORY_CSV = "data/xauusd_m15_history.csv"
 TRADES_CSV = "data/all_trades.csv"

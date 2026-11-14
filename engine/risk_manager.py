@@ -67,7 +67,6 @@ class RiskGuard:
             return False
         if self.trades_today == 0:
             return True
-        # อนุญาตให้ออกไม้ต่อยอด (ไม้ที่ 2 และ 3) เฉพาะวันที่ไม้ก่อนหน้าทั้งหมดปิด TP เท่านั้น (ไม่นับ BE+)
         if HOUSE_MONEY_MODE and (self.tp_wins_today == self.trades_today) and (self.trades_today < MAX_TRADES_PER_DAY):
             return True
         return False
@@ -78,7 +77,6 @@ class RiskGuard:
         else:
             base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
 
-        # ไม้ที่ 2 และไม้ที่ 3 ลดความเสี่ยงลงครึ่งหนึ่งจากไม้แรก และใช้ขนาดเท่ากัน (50% ของฐาน)
         if self.trades_today >= 1:
             return round(base * 0.5, 4)
         return base
@@ -105,7 +103,7 @@ class RiskGuard:
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
                 "be_trigger": entry_price + (sl_dist * BE_TRIGGER_R),
-                "oz": oz, "comm": comm, "atr": atr_val, "is_be": False
+                "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }
         else:
             return {
@@ -114,23 +112,28 @@ class RiskGuard:
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,
                 "be_trigger": entry_price - (sl_dist * BE_TRIGGER_R),
-                "oz": oz, "comm": comm, "atr": atr_val, "is_be": False
+                "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }
 
     def record_close(self, net_pnl, exit_reason):
         self.equity += net_pnl
 
-        # 1. หากชน BE+ ถือว่ากราฟย้อนทาง -> ล็อกหยุดเทรดทันที ไม่ออกไม้ต่อ
+        # ปิดข้ามคืนตอน 03:00 น. จากออเดอร์ของเมื่อวาน ห้ามไปล็อกวันใหม่
+        if ("Rollover" in exit_reason or "Weekend-Close" in exit_reason) and self.trades_today == 0:
+            if net_pnl < -20.0:
+                self.consecutive_losses += 1
+            elif net_pnl > 20.0:
+                self.consecutive_losses = 0
+            return
+
         if "BE+" in exit_reason:
             self.today_be_locked = True
             return
 
-        # 2. อนุญาตให้ออกไม้ต่อเฉพาะกรณีที่ปิด TP เท่านั้น
         if "-TP" in exit_reason and net_pnl > 0:
             self.tp_wins_today += 1
             self.consecutive_losses = 0
         else:
-            # กรณีโดน SL, Rollover หรือ Weekend-Close -> ล็อกหยุดเทรดของวันนั้นทันที
             self.today_loss_locked = True
             if net_pnl < -20.0:
                 self.consecutive_losses += 1

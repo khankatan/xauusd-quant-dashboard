@@ -192,9 +192,9 @@ def run_modular_engine():
             "pf": round((gw / gl), 2) if gl > 0 else (9.99 if gw > 0 else 0.0)
         }
 
-    agents_breakdown = {
-        "VWAP_PB": agent_stats(["VWAP-PB"]),
-        "EV_PB": agent_stats(["EV-PB"]),
+   agents_breakdown = {
+        "VWAP_PB": agent_stats(["SWEET"]),
+        "EV_PB": agent_stats(["SOUR", "SALTY"]),
         "OI_BOOSTED": agent_stats(["+OI"]),
         "ROLLOVER": agent_stats(["Rollover", "Weekend-Close"])
     }

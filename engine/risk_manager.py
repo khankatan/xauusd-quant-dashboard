@@ -5,7 +5,7 @@ from engine.config import (
 )
 
 def get_agent_sl_tp_mult(agent_tag):
-    """ปรับระยะ SL/TP ตามรสชาติของตลาดที่สมองเลือกจากต่อมรับรส"""
+    """ปรับระยะ SL/TP ตามรสชาติของตลาดที่สมองเลือก"""
     if "SALTY" in agent_tag:
         return 1.8, 2.2   # รสเค็ม (ไซด์เวย์): เก็บกำไรไวในกรอบ
     if "SOUR" in agent_tag:
@@ -75,6 +75,7 @@ class RiskGuard:
             return False
         if self.trades_today == 0:
             return True
+        # เปิดสิทธิ์ให้สมองมองหาไม้ที่ 2 หรือ 3 เฉพาะเมื่อไม้ก่อนหน้าปิด TP เท่านั้น
         if HOUSE_MONEY_MODE and (self.tp_wins_today == self.trades_today) and (self.trades_today < MAX_TRADES_PER_DAY):
             return True
         return False
@@ -85,6 +86,7 @@ class RiskGuard:
         else:
             base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
 
+        # ไม้ที่ 2 และไม้ที่ 3 ใช้ความเสี่ยง 50% ของไม้แรกเท่ากัน
         if self.trades_today >= 1:
             return round(base * 0.5, 4)
         return base

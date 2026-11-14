@@ -1,9 +1,10 @@
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     """
-    สมองส่วนตัดสินใจ: รวม 3 เอเจนต์เฉพาะทางเพื่อให้เกิดสัญญาณคุณภาพได้ทุกวันทำการ
-    1. Agent Sweep: จับจังหวะ Liquidity Sweep + VWRSI Reversal (ได้ทั้งรอบเช้า-บ่าย-ค่ำ)
-    2. Agent Session: จับจังหวะเบรกกรอบเอเชีย (Asian Breakout) ตามทิศทาง Session VWAP
-    3. Agent NY-Pulse: จับจังหวะเปิดตลาดนิวยอร์ก (19:30-21:30 น.) หากทั้งวันยังไม่เกิดไม้
+    สมองส่วนตัดสินใจ V2 (แก้จุดอ่อนจากผล Audit all_trades 12):
+    - เลิกไล่ราคา Breakout กรอบเอเชียที่โดน False Breakout บ่อย
+    - เปลี่ยนเป็น:
+      1. Agent Sweep: จับจังหวะกวาด Swing High/Low (หรือกวาด Asian High/Low) แล้วดึงกลับตามเทรนด์ H1
+      2. Agent VWAP-Pullback: จับจังหวะราคาย่อตัวมาทดสอบเส้น Session VWAP แล้วดีดกลับตามเทรนด์ H1 (ออกไม้ได้ทุกวัน)
     """
     t_mins = int(bar["thai_mins"])
     close_p = float(bar["close"])
@@ -12,31 +13,29 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     vwrsi_v = float(bar["vwrsi"])
     h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
 
-    # จำกัดเวลาหาสัญญาณ 08:30 - 22:30 น. เวลาไทย (ป้องกันออเดอร์ค้างข้ามคืนโดน Rollover)
-    if not ((8 * 60 + 30) <= t_mins <= (22 * 60 + 30)):
+    # เทรดเฉพาะช่วง 09:00 - 22:00 น. เวลาไทย (ป้องกันออเดอร์ค้างข้ามคืนโดน Rollover)
+    if not ((9 * 60) <= t_mins <= (22 * 60)):
         return None, ""
 
-    # --- Agent 1: Institutional Liquidity Sweep + VWAP Band ---
-    bull_sweep = (bar["low"] < bar["swing_low"]) and (close_p > bar["swing_low"]) and (close_p > open_p)
-    bear_sweep = (bar["high"] > bar["swing_high"]) and (close_p < bar["swing_high"]) and (close_p < open_p)
+    # --- Agent 1: Liquidity Sweep (กวาด Swing หรือกวาดกรอบ Asian High/Low แล้วดึงกลับ) ---
+    sweep_low_level = min(float(bar["swing_low"]), asian_low) if asian_bars >= 4 else float(bar["swing_low"])
+    sweep_high_level = max(float(bar["swing_high"]), asian_high) if asian_bars >= 4 else float(bar["swing_high"])
 
-    if h1_bull and bull_sweep and (bar["low"] <= bar["vwap_lower"]) and (vwrsi_v < 46) and (vwrsi_v > prev["vwrsi"]):
+    bull_sweep = (bar["low"] < sweep_low_level) and (close_p > sweep_low_level) and (close_p > open_p)
+    bear_sweep = (bar["high"] > sweep_high_level) and (close_p < sweep_high_level) and (close_p < open_p)
+
+    if h1_bull and bull_sweep and (vwrsi_v < 48) and (vwrsi_v > prev["vwrsi"]):
         return "LONG", "SWEEP"
-    if (not h1_bull) and bear_sweep and (bar["high"] >= bar["vwap_upper"]) and (vwrsi_v > 54) and (vwrsi_v < prev["vwrsi"]):
+    if (not h1_bull) and bear_sweep and (vwrsi_v > 52) and (vwrsi_v < prev["vwrsi"]):
         return "SHORT", "SWEEP"
 
-    # --- Agent 2: London-NY Session Breakout (หลัง 14:00 น. เวลาไทย) ---
-    if t_mins >= (14 * 60) and asian_bars >= 4:
-        if h1_bull and (close_p > asian_high) and (close_p > vwap_p) and (vwrsi_v > 53) and (close_p > open_p):
-            return "LONG", "ASIA-BRK"
-        if (not h1_bull) and (close_p < asian_low) and (close_p < vwap_p) and (vwrsi_v < 47) and (close_p < open_p):
-            return "SHORT", "ASIA-BRK"
-
-    # --- Agent 3: NY Opening Momentum Fallback (19:30 - 21:30 น. เพื่อให้ออกไม้ครบทุกวันทำการ) ---
-    if (19 * 60 + 30) <= t_mins <= (21 * 60 + 30):
-        if h1_bull and (close_p > vwap_p) and (vwrsi_v > 54) and (close_p > open_p):
-            return "LONG", "NY-MOM"
-        if (not h1_bull) and (close_p < vwap_p) and (vwrsi_v < 46) and (close_p < open_p):
-            return "SHORT", "NY-MOM"
+    # --- Agent 2: Session VWAP Pullback Continuation (เกิดได้ทุกวันทำการหลัง 13:30 น.) ---
+    if t_mins >= (13 * 60 + 30):
+        # ขาขึ้น H1: ราคาย่อลงมาแตะ/ใต้เส้น VWAP แล้วดีดปิดแท่งเขียวยืนเหนือ VWAP พร้อม VWRSI > 53
+        if h1_bull and (prev["low"] <= prev["vwap"]) and (close_p > vwap_p) and (close_p > open_p) and (53 <= vwrsi_v <= 68) and (vwrsi_v > prev["vwrsi"]):
+            return "LONG", "VWAP-PB"
+        # ขาลง H1: ราคาเด้งขึ้นไปแตะ/เหนือเส้น VWAP แล้วถูกตบปิดแท่งแดงใต้ VWAP พร้อม VWRSI < 47
+        if (not h1_bull) and (prev["high"] >= prev["vwap"]) and (close_p < vwap_p) and (close_p < open_p) and (32 <= vwrsi_v <= 47) and (vwrsi_v < prev["vwrsi"]):
+            return "SHORT", "VWAP-PB"
 
     return None, ""

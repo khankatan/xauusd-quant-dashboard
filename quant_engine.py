@@ -81,6 +81,7 @@ def run_modular_engine():
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
         is_late_night = (t_mins >= 23 * 60 + 30) or (t_mins < 3 * 60)
 
+        # หากมีออเดอร์ถืออยู่ ให้บริหารออเดอร์ในแท่งนี้จนจบ
         if pos is not None:
             exit_price = None
             exit_reason = None
@@ -156,7 +157,9 @@ def run_modular_engine():
                     })
                     pos = None
 
-        if pos is None and (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
+        # ใช้ elif เพื่อบังคับว่าต้องเป็นแท่งเทียนใหม่เท่านั้น (ไม่ยิงซ้ำทันทีในแท่งที่เพิ่งปิด TP)
+        # แล้วให้ลิ้นชิมรสและสมองคำนวณหาจุดเข้าใหม่ตามตรรกะปกติ
+        elif (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars)
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
@@ -279,7 +282,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V10 Sensory Taste-Bud Engine Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
+    print(f"V10.2 Clean Sensory Architecture Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

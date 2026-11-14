@@ -9,8 +9,8 @@ def fetch_macro_oi_and_dxy(m15_df):
     df["macro_status"] = "OI+DXY: STANDARD (0.35%)"
 
     try:
-        gc = yf.Ticker("GC=F").history(period="90d", interval="1d")
-        dxy = yf.Ticker("DX-Y.NYB").history(period="90d", interval="1d")
+        gc = yf.Ticker("GC=F").history(period="2y", interval="1d")
+        dxy = yf.Ticker("DX-Y.NYB").history(period="2y", interval="1d")
 
         if gc.empty:
             return df

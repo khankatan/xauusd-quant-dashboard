@@ -1,8 +1,14 @@
 def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
     """
-    ต่อมรับรสแบบปรับตัวตามสภาพแวดล้อม (Adaptive Homeostasis Taste Buds):
-    ไม่ใช้ตัวเลขคงที่ตายตัว แต่เปรียบเทียบค่าปัจจุบันกับฐานค่าเฉลี่ยย้อนหลัง 100 แท่ง (Dynamic Quantiles)
+    ต่อมรับรสแบบปรับตัวตามสภาพแวดล้อม V11.1 (Bio-Sensory Homeostasis):
+    1. BITTER (ขม): ความผันผวนกระชากผิดธรรมชาติ (> 1.85x) หรือตลาดไร้ชีพจร (< 0.50x)
+    2. SWEET (หวาน): เทรนด์จริงต้องมีทั้งทิศทาง (H1+H4), ความเรียบของเทรนด์ (er >= er_q65)
+       และพลังงานตลาดหนุนหลัง (atr_ratio >= 0.85) เพื่อไม่ให้หลงกลเทรนด์หลอกช่วงตลาดซึม
+    3. SOUR (เปรี้ยว): กับดักกวาดสภาพคล่องขอบ Asian Box เฉพาะช่วงที่กรอบยังสดใหม่
+       และพลังงานไม่พุ่งทะลุกรอบแบบ Breakout จริง (atr_ratio <= 1.25)
+    4. SALTY (เค็ม): ตลาดแกว่งตัวในกรอบ (er < er_q65) และราคาฉีกออกนอก Dynamic Z-Band
     """
+    t_mins = int(bar["thai_mins"])
     atr_ratio = float(bar.get("atr_ratio", 1.0))
     er_v = float(bar.get("er", 0.25))
     er_med = float(bar.get("er_med", 0.25))
@@ -18,13 +24,26 @@ def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
     h4_bear = float(bar["h4_close"]) < float(bar["h4_ema"])
     mtf_aligned = (h1_bull and h4_bull) or (h1_bear and h4_bear)
 
-    # 1. รสขม (BITTER): ความผันผวนกระชากผิดธรรมชาติ หรือตลาดไร้ชีพจร
-    if atr_ratio > 1.85 or atr_ratio < 0.45:
+    # 1. รสขม (BITTER): พิษตลาด
+    if atr_ratio > 1.85 or atr_ratio < 0.50:
         return "BITTER", {"reason": "TOXIC_VOLATILITY"}
 
-    # 2. รสเปรี้ยว (SOUR): ตลาดเพิ่งกวาดสภาพคล่องขอบกรอบเอเชีย (Sweep & Reject)
+    # 2. รสหวาน (SWEET): เทรนด์แท้ ต้องมีทั้งความเรียงตัว (er >= er_q65) และพลังงานวอลุ่ม (atr_ratio >= 0.85)
+    # หากพลังงานต่ำกว่า 0.85 (เช่น ช่วงซึม 10:00-12:59 น.) ต้องมี er สูงระดับพรีเมียมเท่านั้นจึงจะนับเป็นเทรนด์
+    min_er_for_sweet = er_q65 if atr_ratio >= 0.90 else (er_q65 * 1.25)
+    if mtf_aligned and (er_v >= min_er_for_sweet) and (atr_ratio >= 0.78):
+        return "SWEET", {
+            "bull_trend": (h1_bull and h4_bull),
+            "bear_trend": (h1_bear and h4_bear),
+            "er": er_v,
+            "strong_trend": True
+        }
+
+    # 3. รสเปรี้ยว (SOUR): กับดักกวาดสภาพคล่องขอบ Asian Box
+    # ทำงานเมื่อกรอบเอเชียสร้างเสร็จและยังไม่ถูกพลังงานฝั่งอเมริกา (หลัง 18:00 น. หรือ atr_ratio > 1.25) ทุบทำลายกรอบ
     has_asian_box = (asian_bars >= 8) and (asian_high > asian_low)
-    if has_asian_box:
+    box_still_fresh = (t_mins < 18 * 60) and (atr_ratio <= 1.28)
+    if has_asian_box and box_still_fresh:
         swept_low = ((float(bar["low"]) < asian_low) or (float(prev["low"]) < asian_low)) and (float(bar["close"]) > asian_low)
         swept_high = ((float(bar["high"]) > asian_high) or (float(prev["high"]) > asian_high)) and (float(bar["close"]) < asian_high)
         if swept_low or swept_high:
@@ -34,16 +53,7 @@ def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
                 "prev_z": prev_z
             }
 
-    # 3. รสหวาน (SWEET): เทรนด์ไหลลื่น (H1+H4 เรียงตัว และค่า ER สูงกว่าค่ากลางของสภาพแวดล้อมช่วงนั้น)
-    if mtf_aligned and (er_v >= er_med):
-        return "SWEET", {
-            "bull_trend": (h1_bull and h4_bull),
-            "bear_trend": (h1_bear and h4_bear),
-            "er": er_v,
-            "strong_trend": (er_v >= er_q65)
-        }
-
-    # 4. รสเค็ม (SALTY): ตลาดแกว่งในกรอบ และราคาดีดทะลุกรอบ Dynamic Z-Band (z_up / z_dn) ของช่วงนั้น
+    # 4. รสเค็ม (SALTY): ตลาดไซด์เวย์ไร้เทรนด์ และราคาดีดทะลุกรอบ Dynamic Z-Band
     if (er_v < er_q65) and (prev_z <= z_dn or prev_z >= z_up):
         return "SALTY", {
             "prev_z": prev_z,

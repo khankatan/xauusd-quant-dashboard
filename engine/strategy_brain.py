@@ -2,9 +2,8 @@ from engine.taste_buds import taste_market_flavor
 
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     """
-    สมองส่วนกลาง:
-    รับรสชาติจากลิ้น (taste_market_flavor) แล้วประเมินว่ามีจุดเข้าที่ได้เปรียบจริงหรือไม่
-    หากยังไม่ใช่จังหวะที่คมชัด จะส่งคืน (None, "") เพื่อให้นั่งรอ
+    สมองส่วนกลาง V11 (Adaptive Neural Brain):
+    ใช้ค่า Dynamic RSI Mean/Std และเส้น KAMA ที่ยืดหยุ่นตามสภาวะตลาดแทนตัวเลขคงที่
     """
     t_mins = int(bar["thai_mins"])
     if not ((9 * 60 + 30) <= t_mins <= (21 * 60 + 45)):
@@ -13,8 +12,11 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     close_p = float(bar["close"])
     open_p = float(bar["open"])
     vwap_p = float(bar["vwap"])
+    kama_p = float(bar.get("kama", vwap_p))
     vwrsi_v = float(bar["vwrsi"])
     prev_rsi = float(prev["vwrsi"])
+    rsi_mean = float(bar.get("rsi_mean", 50.0))
+    rsi_std = float(bar.get("rsi_std", 10.0))
     fast_z = float(bar.get("fast_z", 0.0))
 
     h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
@@ -22,48 +24,46 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     h4_bull = float(bar["h4_close"]) >= float(bar["h4_ema"])
     h4_bear = float(bar["h4_close"]) < float(bar["h4_ema"])
 
-    # 1. ให้ลิ้นชิมรสชาติของแท่งเทียนปัจจุบัน
+    # 1. ลิ้นชิมรสชาติของตลาดด้วยเกณฑ์แบบ Dynamic
     flavor, info = taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars)
 
     if flavor == "BITTER":
         return None, ""
 
-    # 2A. สมองส่วนรสหวาน (SWEET -> ย่อตัวตามเทรนด์ใหญ่ ไม่ไล่ราคาปลายแท่ง)
+    # 2A. รสหวาน (SWEET -> ย่อตัวหาเส้นสมดุล VWAP หรือ KAMA แล้วดีดกลับตามเทรนด์ใหญ่)
     if flavor == "SWEET":
-        # ท่าที่ 1: ราคาย่อลงมาแตะเส้น VWAP แล้วดีดกลับตามเทรนด์
-        if info["bull_trend"] and (prev["low"] <= prev["vwap"]) and (close_p > vwap_p) and (close_p > open_p):
-            if (50 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (fast_z < 1.20):
-                return "BUY", "SWEET-VWAP"
+        # กรอบ RSI ปรับตัวเองตามค่าเฉลี่ย rsi_mean และส่วนเบี่ยงเบนมาตรฐาน rsi_std ของช่วงนั้น
+        bull_rsi_ok = (rsi_mean - 0.3 * rsi_std) <= vwrsi_v <= (rsi_mean + 1.4 * rsi_std)
+        bear_rsi_ok = (rsi_mean - 1.4 * rsi_std) <= vwrsi_v <= (rsi_mean + 0.3 * rsi_std)
 
-        if info["bear_trend"] and (prev["high"] >= prev["vwap"]) and (close_p < vwap_p) and (close_p < open_p):
-            if (32 <= vwrsi_v <= 50) and (vwrsi_v < prev_rsi) and (fast_z > -1.20):
-                return "SELL", "SWEET-VWAP"
+        touched_bull_val = (float(prev["low"]) <= float(prev["vwap"])) or (float(prev["low"]) <= float(prev.get("kama", prev["vwap"])))
+        touched_bear_val = (float(prev["high"]) >= float(prev["vwap"])) or (float(prev["high"]) >= float(prev.get("kama", prev["vwap"])))
 
-        # ท่าที่ 2: พักตัว 1 แท่ง (Pullback Candle) แล้วส่งแรงไปต่อตามเทรนด์ (ไม่เข้าถ้าราคาฉีกไกลเกิน fast_z +-1.2)
-        prev_red = float(prev["close"]) < float(prev["open"])
-        prev_green = float(prev["close"]) > float(prev["open"])
-        if info["bull_trend"] and prev_red and (close_p > open_p) and (close_p > vwap_p) and (52 <= vwrsi_v <= 66) and (fast_z < 1.10):
-            return "BUY", "SWEET-PB"
-        if info["bear_trend"] and prev_green and (close_p < open_p) and (close_p < vwap_p) and (34 <= vwrsi_v <= 48) and (fast_z > -1.10):
-            return "SELL", "SWEET-PB"
+        if info["bull_trend"] and touched_bull_val and (close_p > open_p) and (close_p > kama_p):
+            if bull_rsi_ok and (vwrsi_v > prev_rsi) and (fast_z < 1.15):
+                return "BUY", "SWEET-TREND"
 
-    # 2B. สมองส่วนรสเปรี้ยว (SOUR -> ดักสวนเมื่อเจ้ามือเพิ่งกวาด SL กรอบเอเชียเสร็จ)
+        if info["bear_trend"] and touched_bear_val and (close_p < open_p) and (close_p < kama_p):
+            if bear_rsi_ok and (vwrsi_v < prev_rsi) and (fast_z > -1.15):
+                return "SELL", "SWEET-TREND"
+
+    # 2B. รสเปรี้ยว (SOUR -> ดักสวนเมื่อกวาดสภาพคล่องกรอบเอเชียเสร็จแล้วตบกลับ)
     if flavor == "SOUR":
-        if info["swept_low"] and (close_p > open_p) and (vwrsi_v > prev_rsi) and (30 <= vwrsi_v <= 55):
+        if info["swept_low"] and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= rsi_mean + 0.5 * rsi_std):
             if not (h1_bear and h4_bear):
                 return "BUY", "SOUR-TRAP"
 
-        if info["swept_high"] and (close_p < open_p) and (vwrsi_v < prev_rsi) and (45 <= vwrsi_v <= 70):
+        if info["swept_high"] and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= rsi_mean - 0.5 * rsi_std):
             if not (h1_bull and h4_bull):
                 return "SELL", "SOUR-TRAP"
 
-    # 2C. สมองส่วนรสเค็ม (SALTY -> ดักเด้งกลับเข้าหาค่าเฉลี่ยในสภาวะไซด์เวย์)
+    # 2C. รสเค็ม (SALTY -> ดักเด้งเมื่อราคาฉีกทะลุกรอบ Dynamic Z-Band ของช่วงนั้นแล้วหมดแรง)
     if flavor == "SALTY":
-        if (info["prev_z"] <= -1.60) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 46):
+        if (info["prev_z"] <= info["z_dn"]) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= rsi_mean - 0.4 * rsi_std):
             if not (h1_bear and h4_bear):
                 return "BUY", "SALTY-MR"
 
-        if (info["prev_z"] >= 1.60) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 54):
+        if (info["prev_z"] >= info["z_up"]) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= rsi_mean + 0.4 * rsi_std):
             if not (h1_bull and h4_bull):
                 return "SELL", "SALTY-MR"
 

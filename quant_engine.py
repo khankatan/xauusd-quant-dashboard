@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from engine.config import (
     INITIAL_CAPITAL, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R,
-    TRAIL_START_R, TRAIL_DIST_ATR, TRADES_CSV, STATE_JSON
+    LATE_BE_TRIGGER_R, TRADES_CSV, STATE_JSON
 )
 from engine.data_feed import fetch_market_data
 from engine.indicators import compute_all_features
@@ -79,6 +79,8 @@ def run_modular_engine():
 
         friday_close_now = must_close_for_weekend(dt)
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
+        # ช่วงดึกหลัง 23:30 น. ไทย (หรือหลังเที่ยงคืน 00:00 - 02:59 น.)
+        is_late_night = (t_mins >= 23 * 60 + 30) or (t_mins < 3 * 60)
 
         if pos is not None:
             exit_price = None
@@ -86,26 +88,18 @@ def run_modular_engine():
             sl_dist = pos["atr"] * SL_ATR_MULT
 
             if pos["type"] == "BUY":
-                # Stage 1: วิ่งบวกถึง 0.85R -> ย้าย SL มาล็อกหน้าทุน BE+ ทันที
-                if not pos["is_be"] and bar["high"] >= pos["be_trigger"]:
-                    pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * 0.08))
-                    pos["is_be"] = True
+                fav_r = (float(bar["high"]) - pos["entry"]) / sl_dist if sl_dist > 0 else 0.0
+                pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                # Stage 2: วิ่งบวกเกิน 1.20R -> ลาก Trailing Stop ตามจุดสูงสุดที่ระยะ 1.40 ATR
-                if bar["high"] >= pos["entry"] + (sl_dist * TRAIL_START_R):
-                    trail_sl = float(bar["high"]) - (pos["atr"] * TRAIL_DIST_ATR)
-                    if trail_sl > pos["sl"]:
-                        pos["sl"] = trail_sl
-                        pos["is_trail"] = True
+                # ล็อก BE+ ที่ 1.35R ตามมาตรฐาน หรือหากค้างดึกหลัง 23:30 น. และเคยบวก >= 0.65R ให้ล็อก BE+ กันไหลกลับ
+                if not pos["is_be"]:
+                    if (bar["high"] >= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
+                        pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * 0.08))
+                        pos["is_be"] = True
 
                 if bar["low"] <= pos["sl"]:
                     exit_price = pos["sl"]
-                    if pos.get("is_trail"):
-                        exit_reason = f"{pos['agent']}{pos['conv']}-TRAIL"
-                    elif pos["is_be"]:
-                        exit_reason = f"{pos['agent']}{pos['conv']}-BE+"
-                    else:
-                        exit_reason = f"{pos['agent']}{pos['conv']}-SL"
+                    exit_reason = f"{pos['agent']}{pos['conv']}-BE+" if pos["is_be"] else f"{pos['agent']}{pos['conv']}-SL"
                 elif bar["high"] >= pos["tp"]:
                     exit_price = pos["tp"]
                     exit_reason = f"{pos['agent']}{pos['conv']}-TP"
@@ -130,26 +124,17 @@ def run_modular_engine():
                     pos = None
 
             elif pos["type"] == "SELL":
-                # Stage 1: วิ่งบวกถึง 0.85R -> ย้าย SL มาล็อกหน้าทุน BE+ ทันที
-                if not pos["is_be"] and bar["low"] <= pos["be_trigger"]:
-                    pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * 0.08))
-                    pos["is_be"] = True
+                fav_r = (pos["entry"] - float(bar["low"])) / sl_dist if sl_dist > 0 else 0.0
+                pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                # Stage 2: วิ่งบวกเกิน 1.20R -> ลาก Trailing Stop ตามจุดต่ำสุดที่ระยะ 1.40 ATR
-                if bar["low"] <= pos["entry"] - (sl_dist * TRAIL_START_R):
-                    trail_sl = float(bar["low"]) + (pos["atr"] * TRAIL_DIST_ATR)
-                    if trail_sl < pos["sl"]:
-                        pos["sl"] = trail_sl
-                        pos["is_trail"] = True
+                if not pos["is_be"]:
+                    if (bar["low"] <= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * 0.08))
+                        pos["is_be"] = True
 
                 if bar["high"] >= pos["sl"]:
                     exit_price = pos["sl"]
-                    if pos.get("is_trail"):
-                        exit_reason = f"{pos['agent']}{pos['conv']}-TRAIL"
-                    elif pos["is_be"]:
-                        exit_reason = f"{pos['agent']}{pos['conv']}-BE+"
-                    else:
-                        exit_reason = f"{pos['agent']}{pos['conv']}-SL"
+                    exit_reason = f"{pos['agent']}{pos['conv']}-BE+" if pos["is_be"] else f"{pos['agent']}{pos['conv']}-SL"
                 elif bar["low"] <= pos["tp"]:
                     exit_price = pos["tp"]
                     exit_reason = f"{pos['agent']}{pos['conv']}-TP"
@@ -296,7 +281,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V7.6 Trailing+BE Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
+    print(f"V7.7 Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

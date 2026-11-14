@@ -79,19 +79,17 @@ def run_modular_engine():
 
         friday_close_now = must_close_for_weekend(dt)
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
-        # ช่วงดึกหลัง 23:30 น. ไทย (หรือหลังเที่ยงคืน 00:00 - 02:59 น.)
         is_late_night = (t_mins >= 23 * 60 + 30) or (t_mins < 3 * 60)
 
         if pos is not None:
             exit_price = None
             exit_reason = None
-            sl_dist = pos["atr"] * SL_ATR_MULT
+            sl_dist = pos.get("sl_dist", pos["atr"] * SL_ATR_MULT)
 
             if pos["type"] == "BUY":
                 fav_r = (float(bar["high"]) - pos["entry"]) / sl_dist if sl_dist > 0 else 0.0
                 pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                # ล็อก BE+ ที่ 1.35R ตามมาตรฐาน หรือหากค้างดึกหลัง 23:30 น. และเคยบวก >= 0.65R ให้ล็อก BE+ กันไหลกลับ
                 if not pos["is_be"]:
                     if (bar["high"] >= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
                         pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * 0.08))
@@ -192,7 +190,7 @@ def run_modular_engine():
             "pf": round((gw / gl), 2) if gl > 0 else (9.99 if gw > 0 else 0.0)
         }
 
-   agents_breakdown = {
+    agents_breakdown = {
         "VWAP_PB": agent_stats(["SWEET"]),
         "EV_PB": agent_stats(["SOUR", "SALTY"]),
         "OI_BOOSTED": agent_stats(["+OI"]),
@@ -281,7 +279,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V7.7 Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
+    print(f"V10 Sensory Taste-Bud Engine Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

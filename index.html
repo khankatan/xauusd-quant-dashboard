@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>XAUUSD Quant Live & Backtest Dashboard</title>
+  <title>XAUUSD Quant Live & Backtest Dashboard (เวลาไทย)</title>
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 16px; }
@@ -29,7 +29,7 @@
     <div id="err-box"></div>
     <div class="header">
       <div>
-        <h2 style="margin:0;">XAUUSD Quant Engine (GitHub Free Backtest & Live)</h2>
+        <h2 style="margin:0;">XAUUSD Quant Engine (เวลาไทย UTC+7)</h2>
         <small id="meta" style="color:#94a3b8;">กำลังโหลดข้อมูล...</small>
       </div>
       <button onclick="loadDashboard()" style="background:#2563eb;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;">รีเฟรชข้อมูล</button>
@@ -85,7 +85,7 @@
 
     <div class="charts-row">
       <div class="chart-box">
-        <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">กราฟราคา XAUUSD M15 (300 แท่งล่าสุด + เส้นมาร์ค)</div>
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:6px;">กราฟราคา XAUUSD M15 (เวลาไทย 24 ชม. + เส้นมาร์ค)</div>
         <div id="price-chart" style="width:100%;height:360px;"></div>
       </div>
       <div class="chart-box">
@@ -94,32 +94,68 @@
       </div>
     </div>
 
-    <div class="section-title">3. ประวัติการจำลองเทรดย้อนหลัง 15 ไม้ล่าสุด</div>
+    <div class="section-title">3. ประวัติการจำลองเทรดย้อนหลัง 15 ไม้ล่าสุด (เวลาไทย 24 ชม.)</div>
     <table>
       <thead>
-        <tr><th>เวลาปิดไม้ (UTC)</th><th>ฝั่ง</th><th>ราคาเข้า</th><th>ราคาออก</th><th>สาเหตุออก</th><th>กำไร/ขาดทุน ($)</th></tr>
+        <tr><th>เวลาปิดไม้ (เวลาไทย)</th><th>ฝั่ง</th><th>ราคาเข้า</th><th>ราคาออก</th><th>สาเหตุออก</th><th>กำไร/ขาดทุน ($)</th></tr>
       </thead>
       <tbody id="trade-rows"></tbody>
     </table>
   </div>
 
   <script>
-    const priceChart = LightweightCharts.createChart(document.getElementById('price-chart'), {
+    // ฟังก์ชันแปลงเวลาเป็นรูปแบบไทย DD/MM/YYYY HH:mm (24 ชม. Asia/Bangkok)
+    function formatThaiDateTime(dateInput) {
+      const d = (typeof dateInput === 'number') ? new Date(dateInput * 1000) : new Date(dateInput);
+      if (isNaN(d.getTime())) return String(dateInput);
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Bangkok',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(d);
+      const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+      return `${map.day}/${map.month}/${map.year} ${map.hour}:${map.minute}`;
+    }
+
+    // ตัวจัดรูปแบบแกนเวลาบนกราฟ (แสดง DD/MM HH:mm ตามเวลาไทย)
+    const thaiAxisFormatter = (time) => {
+      const d = new Date(time * 1000);
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Bangkok',
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).formatToParts(d);
+      const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+      return `${map.day}/${map.month} ${map.hour}:${map.minute}`;
+    };
+
+    const chartCommonOptions = {
       autoSize: true,
       layout: { background: { color: '#1e293b' }, textColor: '#cbd5e1' },
       grid: { vertLines: { color: '#334155' }, horzLines: { color: '#334155' } },
-      timeScale: { timeVisible: true }
-    });
+      localization: {
+        timeFormatter: (time) => formatThaiDateTime(time) + ' น.'
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: thaiAxisFormatter
+      }
+    };
+
+    const priceChart = LightweightCharts.createChart(document.getElementById('price-chart'), chartCommonOptions);
     const candleSeries = priceChart.addCandlestickSeries({
       upColor: '#10b981', downColor: '#ef4444', borderVisible: false, wickUpColor: '#10b981', wickDownColor: '#ef4444'
     });
 
-    const eqChart = LightweightCharts.createChart(document.getElementById('eq-chart'), {
-      autoSize: true,
-      layout: { background: { color: '#1e293b' }, textColor: '#cbd5e1' },
-      grid: { vertLines: { color: '#334155' }, horzLines: { color: '#334155' } },
-      timeScale: { timeVisible: true }
-    });
+    const eqChart = LightweightCharts.createChart(document.getElementById('eq-chart'), chartCommonOptions);
     const eqSeries = eqChart.addAreaSeries({
       lineColor: '#10b981', topColor: 'rgba(16, 185, 129, 0.35)', bottomColor: 'rgba(16, 185, 129, 0.0)'
     });
@@ -132,7 +168,9 @@
         if (!res.ok) throw new Error('โหลดไฟล์ state.json ไม่สำเร็จ (HTTP ' + res.status + ')');
         const data = await res.json();
 
-        document.getElementById('meta').innerText = `อัปเดต: ${data.updated_utc} | แหล่งข้อมูล: ${data.data_source}`;
+        // แปลงเวลา updated_utc เป็นเวลาไทย
+        const thaiUpdated = formatThaiDateTime(data.updated_utc.replace(' UTC', 'Z'));
+        document.getElementById('meta').innerText = `อัปเดตล่าสุด: ${thaiUpdated} น. (เวลาไทย) | แหล่งข้อมูล: ${data.data_source}`;
         
         const sigEl = document.getElementById('sig-type');
         sigEl.innerText = data.signal.type;
@@ -148,7 +186,10 @@
         const pnlEl = document.getElementById('bt-pnl');
         pnlEl.innerText = `${bt.net_pnl >= 0 ? '+' : ''}$${bt.net_pnl.toLocaleString()} (${bt.net_pnl_pct}%)`;
         pnlEl.className = 'val ' + (bt.net_pnl >= 0 ? 'pos' : 'neg');
-        document.getElementById('bt-range').innerText = data.history_range;
+
+        // แปลงช่วงวันที่ใน history_range จาก YYYY-MM-DD เป็น DD/MM/YYYY
+        const rangeThai = data.history_range.replace(/(\d{4})-(\d{2})-(\d{2})/g, '$3/$2/$1');
+        document.getElementById('bt-range').innerText = rangeThai;
         document.getElementById('bt-wr').innerText = `${bt.win_rate}% (${bt.total_trades} ไม้)`;
         document.getElementById('bt-pf').innerText = `Profit Factor: ${bt.profit_factor}`;
         document.getElementById('bt-dd').innerText = `${bt.max_dd_pct}%`;
@@ -173,7 +214,7 @@
         const tbody = document.getElementById('trade-rows');
         tbody.innerHTML = bt.recent_trades.map(t => `
           <tr>
-            <td>${t.exit_str}</td>
+            <td>${formatThaiDateTime(t.exit_time)} น.</td>
             <td class="${t.type === 'LONG' ? 'pos' : 'neg'}" style="font-weight:700;">${t.type}</td>
             <td>$${t.entry}</td>
             <td>$${t.exit}</td>

@@ -1,16 +1,22 @@
-def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
+def taste_market_flavor(bar, prev, asian_high=None, asian_low=None, asian_bars=0):
     """
-    สวิตช์คัดกรองสภาวะตลาด V13.1 (Hybrid File 33 + File 34 Calibration):
-    1. BITTER: ตลาดผันผวนกระชากผิดปกติ (atr_ratio > 1.85) หรือตลาดนิ่งสนิท (< 0.45)
-    2. SOUR (Trap): กวาดขอบ Asian High/Low ในช่วงบ่ายลอนดอน (14:00-17:45 น.)
-    3. SALTY (Sideways MR): สมองทำเงินหลัก (WR 64.3% ในทั้งไฟล์ 33 และ 34)
-       ทำงานเมื่อ CHOP >= 46.0 (รวมโซนก้ำกึ่งที่เคยทำให้ SWEET-VWAP แพ้) และราคาฉีกเกิน |prev_z| >= 1.50
-    4. SWEET (Trend VWAP/EV): ทำงานเมื่อ H1+H4 เรียงตัวสอดคล้องกัน และ CHOP < 54.0
+    สวิตช์คัดกรองสภาวะตลาด V14.1 (Pure Mathematical Routing + Macro OI Alignment):
+    1. ไม่ใช้ชั่วโมงเวลา (t_hour) มาบังคับเลือกกลยุทธ์
+    2. แก้ความขัดแย้ง SALTY-MR +OI Paradox (-$3,155 ในไฟล์ 36):
+       หากวันนั้นมีสัญญาณสถาบันดันเทรนด์ (macro_bull_conv หรือ macro_bear_conv = +OI)
+       ห้ามส่งเข้าโหมดไซด์เวย์ SALTY-MR เด็ดขาด!
     """
-    t_mins = int(bar["thai_mins"])
     atr_ratio = float(bar.get("atr_ratio", 1.0))
     chop_v = float(bar.get("chop", 50.0))
     prev_z = float(prev.get("fast_z", 0.0))
+    kama_slope = float(bar.get("kama_slope", 0.0))
+    p_accel = float(bar.get("price_accel", 0.0))
+
+    close_p = float(bar["close"])
+    high_p = float(bar["high"])
+    low_p = float(bar["low"])
+    struct_h = float(bar.get("struct_high", high_p))
+    struct_l = float(bar.get("struct_low", low_p))
 
     h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
     h1_bear = float(bar["h1_close"]) < float(bar["h1_ema"])
@@ -18,33 +24,43 @@ def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
     h4_bear = float(bar["h4_close"]) < float(bar["h4_ema"])
     mtf_aligned = (h1_bull and h4_bull) or (h1_bear and h4_bear)
 
+    # ตรวจสอบแรงหนุนสถาบัน COMEX OI + DXY (+OI)
+    has_macro_expansion = bool(bar.get("macro_bull_conv", False)) or bool(bar.get("macro_bear_conv", False))
+
     # 1. รสขม (BITTER): ข่าวกระชากผิดธรรมชาติ หรือตลาดไร้ชีพจร
     if atr_ratio > 1.85 or atr_ratio < 0.45:
         return "BITTER", {"reason": "TOXIC_VOLATILITY"}
 
-    # 2. รสเปรี้ยว (SOUR): กับดักกวาดสภาพคล่อง Asian Box ช่วงบ่ายลอนดอน (14:00 - 17:45 น.)
-    has_asian_box = (asian_bars >= 8) and (asian_high > asian_low) and ((14 * 60) <= t_mins <= (17 * 60 + 45))
-    if has_asian_box and (atr_ratio <= 1.30):
-        swept_low = ((float(bar["low"]) < asian_low) or (float(prev["low"]) < asian_low)) and (float(bar["close"]) > asian_low)
-        swept_high = ((float(bar["high"]) > asian_high) or (float(prev["high"]) > asian_high)) and (float(bar["close"]) < asian_high)
+    # 2. รสเปรี้ยว (SOUR): กับดักกวาดสภาพคล่องขอบโครงสร้างวัฏจักร (Rolling Cycle Box หรือ Asian Box)
+    # ตัดสินด้วยคณิตศาสตร์: ความผันผวนไม่เกิน 1.30x และเกิดความเร่งอนุพันธ์อันดับ 2 สวนกลับเข้ากรอบ
+    ref_high = max(float(asian_high), struct_h) if (asian_bars >= 8 and asian_high > asian_low) else struct_h
+    ref_low = min(float(asian_low), struct_l) if (asian_bars >= 8 and asian_high > asian_low) else struct_l
+
+    if (ref_high > ref_low) and (atr_ratio <= 1.30):
+        swept_low = ((low_p < ref_low) or (float(prev["low"]) < ref_low)) and (close_p > ref_low) and (p_accel > 0.0)
+        swept_high = ((high_p > ref_high) or (float(prev["high"]) > ref_high)) and (close_p < ref_high) and (p_accel < 0.0)
         if swept_low or swept_high:
             return "SOUR", {
                 "swept_low": swept_low,
                 "swept_high": swept_high
             }
 
-    # 3. รสเค็ม (SALTY): ชนะถึง 64.3%-64.7% ทั้งในไฟล์ 33 และ 34 -> ขยายมารับโซน CHOP >= 46.0 เมื่อราคาฉีกตัว
-    if (chop_v >= 46.0) and (abs(prev_z) >= 1.50):
+    # 3. รสเค็ม (SALTY): ตลาดไซด์เวย์ (CHOP >= 48.0 & ราคาฉีกตัว |prev_z| >= 1.50)
+    # กฎเหล็กจากไฟล์ 36: ต้องเป็นวันที่ไม่มีแรงระเบิดเทรนด์จากสถาบัน (not has_macro_expansion) เท่านั้น!
+    if (not has_macro_expansion) and (chop_v >= 48.0) and (abs(prev_z) >= 1.50):
         return "SALTY", {
             "prev_z": prev_z
         }
 
-    # 4. รสหวาน (SWEET): เทรนด์ H1+H4 เรียงตัวสอดคล้องกัน
+    # 4. รสหวาน (SWEET): เทรนด์ H1+H4 เรียงตัวสอดคล้องกัน และ CHOP < 54.0
     if (chop_v < 54.0) and mtf_aligned:
         return "SWEET", {
             "bull_trend": (h1_bull and h4_bull),
             "bear_trend": (h1_bear and h4_bear),
-            "chop": chop_v
+            "chop": chop_v,
+            "kama_slope": kama_slope,
+            "atr_ratio": atr_ratio,
+            "has_macro_expansion": has_macro_expansion
         }
 
     return "BITTER", {"reason": "NO_DISTINCT_FLAVOR"}

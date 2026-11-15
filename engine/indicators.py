@@ -45,7 +45,9 @@ def compute_hilbert_dominant_cycle(price_arr, min_p=10, max_p=28):
 def compute_all_features(df):
     d = df.copy()
     d["thai_dt"] = d["datetime"] + pd.Timedelta(hours=7)
-    d["thai_date"] = d["thai_dt"].dt.date
+    # แก้บั๊ก Midnight Lockout: ใช้วันทำการของเซสชัน (ตัดวันใหม่ตอน 04:00 น. หลังปิด Rollover 03:00 น.)
+    # เพื่อไม่ให้ออเดอร์ที่ปิดระหว่าง 00:00 - 03:00 น. ไปล็อกโควตาของวันรุ่งขึ้น!
+    d["thai_date"] = (d["thai_dt"] - pd.Timedelta(hours=4)).dt.date
     d["thai_hour"] = d["thai_dt"].dt.hour
     d["thai_minute"] = d["thai_dt"].dt.minute
     d["thai_mins"] = d["thai_hour"] * 60 + d["thai_minute"]
@@ -61,7 +63,7 @@ def compute_all_features(df):
     d["atr_base"] = d["atr"].rolling(100, min_periods=20).mean()
     d["atr_ratio"] = (d["atr"] / d["atr_base"]).fillna(1.0)
 
-    # 2. Hilbert Dominant Cycle (P_t), Adaptive CHOP, Structure Box & Dynamic Ichimoku Tenkan/Kijun
+    # 2. Hilbert Dominant Cycle (P_t), Adaptive CHOP, Structure Box & Dynamic Tenkan/Kijun
     hl2 = ((d["high"] + d["low"]) / 2.0).values
     dom_cycle = compute_hilbert_dominant_cycle(hl2, min_p=10, max_p=28)
     d["dom_cycle"] = dom_cycle
@@ -81,7 +83,6 @@ def compute_all_features(df):
 
     for i in range(n):
         p = int(dom_cycle[i])
-        # ปรับคาบเวลา Tenkan (ครึ่งรอบวัฏจักร: 0.5*P_t) และ Kijun (1.5 รอบวัฏจักร: 1.5*P_t) แบบไดนามิก
         t_len = max(5, int(round(0.5 * p)))
         k_len = max(13, int(round(1.5 * p)))
 
@@ -103,7 +104,6 @@ def compute_all_features(df):
         struct_high_arr[i] = np.max(high_arr[i - p : i])
         struct_low_arr[i] = np.min(low_arr[i - p : i])
 
-        # คำนวณ Dynamic Tenkan-sen และ Dynamic Kijun-sen (จุดสมดุล 50% ของกรอบวัฏจักร)
         tenkan_arr[i] = 0.5 * (np.max(high_arr[i - t_len + 1 : i + 1]) + np.min(low_arr[i - t_len + 1 : i + 1]))
         kijun_arr[i] = 0.5 * (np.max(high_arr[i - k_len + 1 : i + 1]) + np.min(low_arr[i - k_len + 1 : i + 1]))
 
@@ -113,8 +113,6 @@ def compute_all_features(df):
     d["struct_low"] = struct_low_arr
     d["tenkan"] = tenkan_arr
     d["kijun"] = kijun_arr
-    # วัดระยะฉีกตัวจากเส้น Kijun (Kijun Disparity ในหน่วย ATR)
-    d["kijun_disp"] = (d["close"] - d["kijun"]) / (d["atr"] + 1e-9)
 
     # 3. KAMA & แคลคูลัสอนุพันธ์ (Slope & Acceleration)
     kama = np.zeros(n)

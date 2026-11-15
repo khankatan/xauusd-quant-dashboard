@@ -163,7 +163,12 @@ def run_modular_engine():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars)
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
-                pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv)
+                pos = guard.build_order(
+                    sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv,
+                    swing_low=float(bar.get("swing_low", bar["low"])),
+                    swing_high=float(bar.get("swing_high", bar["high"])),
+                    atr_ratio=float(bar.get("atr_ratio", 1.0))
+                )
 
         if i % 4 == 0:
             equity_curve.append({"time": now_ts, "value": round(guard.equity, 2)})

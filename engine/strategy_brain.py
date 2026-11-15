@@ -2,12 +2,11 @@ from engine.taste_buds import taste_market_flavor
 
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=0):
     """
-    สมองส่วนกลาง V15.3 (Pure Profitable Engines from File 42 + Dynamic Tenkan/Kijun Pullback):
-    - ล็อกเวลาสแกนที่พิสูจน์แล้วว่าเสถียรที่สุด 09:30 - 21:45 น. (ไม่โดนหลอกช่วง 08:30-09:15 น. ที่ VWAP เพิ่งรีเซ็ต)
-    - ถอด SWEET-KAMA (ตัวการเดียวที่ทำให้ไฟล์ 42, 43, 44 ขาดทุนไป -$932 ถึง -$2,410) ออกอย่างเด็ดขาด!
-    - ใช้เส้น Dynamic Tenkan-sen และ Kijun-sen เป็นแนวรับ-แนวต้านเสริมให้กับ SWEET-VWAP:
-      กล่าวคือ ถ้าราคาในเทรนด์ย่อลงมาแตะ Session VWAP หรือย่อลงมาแตะ Dynamic Tenkan/Kijun แล้วดีดกลับตามเทรนด์
-      จะสามารถเปิดไม้ SWEET-VWAP ได้ทันที (ช่วยให้จับจังหวะย่อในเทรนด์ได้ครบขึ้นโดยไม่เกิดสัญญาณหลอก)
+    สมองส่วนกลาง V15.3 (แยกป้ายกำกับชัดเจน ไม่ใช้ชื่อซ้ำ):
+    - SWEET-VWAP: เมื่อราคาย่อทดสอบเส้น Session VWAP แล้วดีดกลับตามเทรนด์
+    - SWEET-TK  : เมื่อราคาย่อทดสอบแนวรับ-แนวต้าน Dynamic Tenkan/Kijun แล้วดีดกลับตามเทรนด์ (ก่อน 20:30 น.)
+    - SOUR-TRAP : เมื่อราคากวาดสภาพคล่องขอบโครงสร้างแล้วดีดกลับด้วยความเร่งแคลคูลัส
+    - SALTY-MR  : เมื่อราคาฉีกออกนอกกรอบ Z-Score ในสภาวะไซด์เวย์ (CHOP >= 50)
     """
     t_mins = int(bar["thai_mins"])
     if not ((9 * 60 + 30) <= t_mins <= (21 * 60 + 45)):
@@ -38,7 +37,7 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
         return None, ""
 
     # =========================================================================
-    # 1. โหมดรสหวาน (SWEET): ประสานสมองซีกซ้าย + ซีกขวา พร้อมแนวรับ-แนวต้าน Dynamic Tenkan/Kijun
+    # 1. โหมดรสหวาน (SWEET): แยกป้าย SWEET-VWAP และ SWEET-TK ชัดเจน
     # =========================================================================
     if flavor == "SWEET":
         chop_v = float(info.get("chop", 50.0))
@@ -48,40 +47,50 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
         tk_bull = bool(info.get("tk_bull", False))
         tk_bear = bool(info.get("tk_bear", False))
 
-        # แนวรับ-แนวต้านร่วมระหว่าง Session VWAP และ Dynamic Kijun-sen (เมื่อ Tenkan/Kijun เรียงตัวตามเทรนด์)
         pulled_bull_vwap = (float(prev["low"]) <= float(prev["vwap"])) and (close_p > vwap_p)
-        pulled_bull_tk = tk_bull and (float(prev["low"]) <= prev_kijun) and (close_p > kijun_p) and (close_p > tenkan_p) and (close_p > vwap_p)
-
         pulled_bear_vwap = (float(prev["high"]) >= float(prev["vwap"])) and (close_p < vwap_p)
-        pulled_bear_tk = tk_bear and (float(prev["high"]) >= prev_kijun) and (close_p < kijun_p) and (close_p < tenkan_p) and (close_p < vwap_p)
+
+        # เงื่อนไขย่อแตะแนวรับ-แนวต้าน Dynamic Kijun/Tenkan (ติดป้าย SWEET-TK แยกต่างหาก และไม่เข้าหลัง 20:30 น.)
+        pulled_bull_tk = (t_mins <= 20 * 60 + 30) and tk_bull and (float(prev["low"]) <= prev_kijun) and (close_p > kijun_p) and (close_p > tenkan_p) and (close_p > vwap_p)
+        pulled_bear_tk = (t_mins <= 20 * 60 + 30) and tk_bear and (float(prev["high"]) >= prev_kijun) and (close_p < kijun_p) and (close_p < tenkan_p) and (close_p < vwap_p)
 
         # [ซีกซ้าย - Left Hemisphere]: เกณฑ์ Sniper เข้มงวด
         if chop_v < 50.0:
             left_bull_exp = ((chop_v < 38.2) and (k_slope > 0.01)) or ((atr_r >= 0.90) and (k_slope >= 0.03))
             left_bear_exp = ((chop_v < 38.2) and (k_slope < -0.01)) or ((atr_r >= 0.90) and (k_slope <= -0.03))
 
-            if info["bull_trend"] and left_bull_exp and (pulled_bull_vwap or pulled_bull_tk) and (close_p > open_p):
-                if (52 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (fast_z <= 1.05):
+            if info["bull_trend"] and left_bull_exp and (close_p > open_p) and (52 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (fast_z <= 1.05):
+                if pulled_bull_vwap:
                     return "BUY", "SWEET-VWAP"
+                if pulled_bull_tk:
+                    return "BUY", "SWEET-TK"
 
-            if info["bear_trend"] and left_bear_exp and (pulled_bear_vwap or pulled_bear_tk) and (close_p < open_p):
-                if (32 <= vwrsi_v <= 48) and (vwrsi_v < prev_rsi) and (fast_z >= -1.05):
+            if info["bear_trend"] and left_bear_exp and (close_p < open_p) and (32 <= vwrsi_v <= 48) and (vwrsi_v < prev_rsi) and (fast_z >= -1.05):
+                if pulled_bear_vwap:
                     return "SELL", "SWEET-VWAP"
+                if pulled_bear_tk:
+                    return "SELL", "SWEET-TK"
 
-        # [ซีกขวา - Right Hemisphere]: Contextual Flow (จากไฟล์ 42 ที่ทำกำไร +$960.83)
+        # [ซีกขวา - Right Hemisphere]: Contextual Flow
         right_bull_flow = (k_slope > 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.72))
         right_bear_flow = (k_slope < 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.72))
 
-        if info["bull_trend"] and right_bull_flow and (pulled_bull_vwap or pulled_bull_tk) and (close_p > kama_p) and (close_p > open_p):
+        if info["bull_trend"] and right_bull_flow and (close_p > kama_p) and (close_p > open_p):
             if (50 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (p_accel > 0.0) and (fast_z <= 1.00):
-                return "BUY", "SWEET-VWAP"
+                if pulled_bull_vwap:
+                    return "BUY", "SWEET-VWAP"
+                if pulled_bull_tk:
+                    return "BUY", "SWEET-TK"
 
-        if info["bear_trend"] and right_bear_flow and (pulled_bear_vwap or pulled_bear_tk) and (close_p < kama_p) and (close_p < open_p):
+        if info["bear_trend"] and right_bear_flow and (close_p < kama_p) and (close_p < open_p):
             if (32 <= vwrsi_v <= 50) and (vwrsi_v < prev_rsi) and (p_accel < 0.0) and (fast_z >= -1.00):
-                return "SELL", "SWEET-VWAP"
+                if pulled_bear_vwap:
+                    return "SELL", "SWEET-VWAP"
+                if pulled_bear_tk:
+                    return "SELL", "SWEET-TK"
 
     # =========================================================================
-    # 2. โหมดรสเปรี้ยว (SOUR): แชมป์ทำกำไร +$3,809.24 (WR 67.74%) ในไฟล์ 42
+    # 2. โหมดรสเปรี้ยว (SOUR): แชมป์ทำกำไร +$3,809.24 ในไฟล์ 42
     # =========================================================================
     if flavor == "SOUR":
         hemi = info.get("hemisphere", "L")
@@ -97,7 +106,7 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
                 return "SELL", "SOUR-TRAP"
 
     # =========================================================================
-    # 3. โหมดรสเค็ม (SALTY): ดักเด้งไซด์เวย์ตามโครงสร้างใหญ่ H4 (+$762.89 ในไฟล์ 42)
+    # 3. โหมดรสเค็ม (SALTY): ดักเด้งไซด์เวย์ตามโครงสร้างใหญ่ H4
     # =========================================================================
     if flavor == "SALTY":
         if h4_bull and (info["prev_z"] <= -1.55) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 45):

@@ -1,33 +1,16 @@
-import numpy as np
 from engine.config import (
     INITIAL_CAPITAL, BASE_RISK_PCT, CONVICTION_RISK_PCT, THROTTLED_RISK_PCT,
     DAILY_TARGET_PCT, HARD_DAILY_DD_PCT, MAX_TRADES_PER_DAY, STOP_ON_BE_PLUS,
     HOUSE_MONEY_MODE, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, COMMISSION_PER_OZ
 )
 
-def compute_structural_sl_tp(direction, agent_tag, entry_price, atr_val, swing_low, swing_high, atr_ratio):
-    """
-    คำนวณจุดตัดขาดทุนและเป้าหมายกำไรจากโครงสร้างราคาจริง (Swing Structure + Vol-Scaled Buffer)
-    ปรับระยะเพดาน SL และ RR Target ให้พอดีกับระยะวิ่งจริงของวัฏจักร M15 (ไม่ตั้งเป้าไกลเกินจนราคาเลี้ยวกลับก่อน)
-    """
-    vol_scale = float(np.clip(atr_ratio, 0.85, 1.30))
-
+def get_agent_sl_tp_mult(agent_tag):
+    """ปรับระยะ SL/TP ตามบุคลิกของสมองแต่ละรสชาติ (ตามสูตรที่ทำกำไรจริงในไฟล์ 26, 29, 32)"""
     if "SALTY" in agent_tag:
-        buf_mult, min_sl_m, max_sl_m, rr_target = 0.65 * vol_scale, 1.4, 2.0, 1.20
-    elif "SOUR" in agent_tag:
-        buf_mult, min_sl_m, max_sl_m, rr_target = 0.80 * vol_scale, 1.6, 2.3, 1.40
-    else:  # SWEET-TREND
-        buf_mult, min_sl_m, max_sl_m, rr_target = 0.85 * vol_scale, 1.6, 2.2, 1.35
-
-    if direction == "BUY":
-        raw_struct_sl = float(swing_low) - (atr_val * buf_mult)
-        sl_dist = np.clip(entry_price - raw_struct_sl, atr_val * min_sl_m, atr_val * max_sl_m)
-    else:
-        raw_struct_sl = float(swing_high) + (atr_val * buf_mult)
-        sl_dist = np.clip(raw_struct_sl - entry_price, atr_val * min_sl_m, atr_val * max_sl_m)
-
-    tp_dist = sl_dist * rr_target
-    return float(sl_dist), float(tp_dist)
+        return 1.8, 2.2   # รสเค็ม (ไซด์เวย์): เก็บกำไรไวในกรอบ (ชนะ 30 ไม้ +$11,263 ในไฟล์ 29)
+    if "SOUR" in agent_tag:
+        return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): เก็บระยะดีดกลับปานกลาง (+$1,762 ในไฟล์ 32)
+    return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (SWEET 2.2 / 3.5): รันเทรนด์ยาว (+$3,040 ช่วง ต.ค.-พ.ย. ในไฟล์ 26)
 
 class RiskGuard:
     def __init__(self, initial_capital=INITIAL_CAPITAL):
@@ -106,13 +89,10 @@ class RiskGuard:
             return round(base * 0.5, 4)
         return base
 
-    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, swing_low=None, swing_high=None, atr_ratio=1.0):
-        s_low = entry_price - atr_val if swing_low is None else float(swing_low)
-        s_high = entry_price + atr_val if swing_high is None else float(swing_high)
-
-        sl_dist, tp_dist = compute_structural_sl_tp(
-            direction, agent_tag, entry_price, atr_val, s_low, s_high, atr_ratio
-        )
+    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, **kwargs):
+        sl_mult, tp_mult = get_agent_sl_tp_mult(agent_tag)
+        sl_dist = atr_val * sl_mult
+        tp_dist = atr_val * tp_mult
         if sl_dist <= 0:
             return None
 
@@ -131,7 +111,7 @@ class RiskGuard:
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
-                "be_trigger": entry_price + (sl_dist * 0.95),
+                "be_trigger": entry_price + (sl_dist * BE_TRIGGER_R),
                 "sl_dist": sl_dist,
                 "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }
@@ -141,7 +121,7 @@ class RiskGuard:
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,
-                "be_trigger": entry_price - (sl_dist * 0.95),
+                "be_trigger": entry_price - (sl_dist * BE_TRIGGER_R),
                 "sl_dist": sl_dist,
                 "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }

@@ -15,6 +15,7 @@ from engine.indicators import compute_all_features
 from engine.macro_oi import fetch_macro_oi_and_dxy
 from engine.strategy_brain import evaluate_signals
 from engine.gap_filler_engine import evaluate_gap_filler
+from engine.advisor_engine import evaluate_advisor_recovery_signal
 from engine.risk_manager import RiskGuard, get_agent_sl_tp_mult
 
 os.makedirs("data", exist_ok=True)
@@ -55,6 +56,9 @@ def run_modular_engine():
     pos = None
     closed_trades = []
     equity_curve = []
+    
+    # ตัวแปรจำกัดให้ Advisor ทำงานได้ 1 ไม้กู้ชีพต่อวันที่เกิด SL
+    advisor_traded_today = {}
 
     start_idx = 105
     for i in range(start_idx, len(df) - 1):
@@ -79,6 +83,9 @@ def run_modular_engine():
             lon_open = None
             lon_close = None
 
+        if bar_date not in advisor_traded_today:
+            advisor_traded_today[bar_date] = False
+
         if (8 * 60) <= t_mins <= (13 * 60 + 45):
             asian_high = max(asian_high, float(bar["high"]))
             asian_low = min(asian_low, float(bar["low"]))
@@ -101,7 +108,7 @@ def run_modular_engine():
             sl_dist = pos.get("sl_dist", pos["atr"] * SL_ATR_MULT)
             tag_prefix = f"{pos['agent']}{pos['conv']}"
 
-            gap_intraday_exit = (("GAP-" in pos["agent"]) or ("FLIP-" in pos["agent"])) and (int(bar["thai_hour"]) == 2 and int(bar["thai_minute"]) >= 30)
+            gap_intraday_exit = (("GAP-" in pos["agent"]) or ("FLIP-" in pos["agent"]) or ("ADVISOR-" in pos["agent"])) and (int(bar["thai_hour"]) == 2 and int(bar["thai_minute"]) >= 30)
 
             if pos["type"] == "BUY":
                 fav_r = (float(bar["high"]) - pos["entry"]) / sl_dist if sl_dist > 0 else 0.0
@@ -155,7 +162,13 @@ def run_modular_engine():
                     net_pnl = pos["partial_pnl"] + rem_pnl
                     eff_exit = (pos["tp1"] * pos["partial_ratio"] + exit_price * rem_ratio) if pos["partial_closed"] else exit_price
 
+                    is_sl_hit = ("-SL" in exit_reason) or (net_pnl < 0)
                     guard.record_close(net_pnl, exit_reason, pos["agent"])
+                    
+                    # ถ้าออเดอร์โดน SL ให้ปลดล็อกส่งไม้ต่อให้ Advisor เข้ามาทำงานกู้ชีพทันที
+                    if is_sl_hit:
+                        guard.today_loss_locked = True
+
                     guard.on_new_bar(bar_date)
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
@@ -197,7 +210,7 @@ def run_modular_engine():
 
                     elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
                         pos["is_be"] = True
-                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (sl_dist * BE_BUFFER_ATR))
 
                     if float(bar["low"]) <= pos["tp"]:
                         exit_price = pos["tp"]
@@ -218,7 +231,12 @@ def run_modular_engine():
                     net_pnl = pos["partial_pnl"] + rem_pnl
                     eff_exit = (pos["tp1"] * pos["partial_ratio"] + exit_price * rem_ratio) if pos["partial_closed"] else exit_price
 
+                    is_sl_hit = ("-SL" in exit_reason) or (net_pnl < 0)
                     guard.record_close(net_pnl, exit_reason, pos["agent"])
+                    
+                    if is_sl_hit:
+                        guard.today_loss_locked = True
+
                     guard.on_new_bar(bar_date)
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
@@ -229,14 +247,31 @@ def run_modular_engine():
                     })
                     pos = None
 
-        elif (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
-            sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, guard.trades_today)
-            if sig_dir is None and guard.trades_today == 0:
-                sig_dir, agent_tag = evaluate_gap_filler(bar, prev, guard.trades_today, lon_open, lon_close)
+        # ระบบเลือกสมองประเมินสัญญาณเทรนด์
+        elif (not friday_close_now) and (not daily_rollover_now):
+            sig_dir, agent_tag = None, ""
+            
+            # ถ้าวันนี้ระบบหลักโดน SL และ Advisor ยังไม่เคยเทรดในวันนี้ -> เรียก Advisor เข้ามาทำหน้าที่กู้ชีพ
+            if guard.today_loss_locked and not advisor_traded_today[bar_date]:
+                sig_dir, agent_tag = evaluate_advisor_recovery_signal(bar, prev, float(bar["atr"]))
+                if sig_dir is not None:
+                    advisor_traded_today[bar_date] = True
+            else:
+                if guard.can_trade():
+                    sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, guard.trades_today)
+                    if sig_dir is None and guard.trades_today == 0:
+                        sig_dir, agent_tag = evaluate_gap_filler(bar, prev, guard.trades_today, lon_open, lon_close)
 
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
                 pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv, utc_hour=utc_hour)
+                if pos is not None and "ADVISOR-" in agent_tag:
+                    target_r = 0.30
+                    scale = target_r / pos["risk_pct"] if pos["risk_pct"] > 0 else 1.0
+                    pos["oz"] *= scale
+                    pos["rem_oz"] *= scale
+                    pos["comm"] *= scale
+                    pos["risk_pct"] = target_r
 
         if i % 4 == 0:
             equity_curve.append({"time": now_ts, "value": round(guard.equity, 2)})
@@ -332,7 +367,7 @@ def run_modular_engine():
     else:
         sig_payload = {
             "type": "WAIT",
-            "agent": "SCANNING (V17 JUDAS-FLIP DUAL-BRAIN)",
+            "agent": "SCANNING (V20 SL-RECOVERY & SQUEEZE)",
             "risk_pct": guard.get_active_risk_pct(False, "", atr_now, curr_utc_h),
             "entry": None, "sl": None, "tp1": None, "tp": None, "be_trigger": None, "lot_size": 0.0
         }
@@ -352,7 +387,7 @@ def run_modular_engine():
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_source": f"{source_name} + COMEX GC=F OI & DXY (V17 Judas-Flip Dual-Brain)",
+        "data_source": f"{source_name} + COMEX GC=F OI & DXY (V20 SL-Recovery & Squeeze)",
         "history_range": f"{df.iloc[0]['datetime'].strftime('%Y-%m-%d')} ถึง {df.iloc[-1]['datetime'].strftime('%Y-%m-%d')} ({total_mon_fri_days} วันทำการ)",
         "current_price": round(float(df.iloc[-1]["close"]), 2),
         "equity": round(guard.equity, 2),
@@ -388,7 +423,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V17 Judas-Flip Dual-Brain Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
+    print(f"V20 SL-Recovery & Squeeze Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

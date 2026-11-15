@@ -1,169 +1,75 @@
-import numpy as np
-import pandas as pd
-from engine.config import ATR_LEN, VWRSI_LEN, H1_EMA_LEN
+def taste_market_flavor(bar, prev, asian_high=None, asian_low=None, asian_bars=0, trades_today=0):
+    """
+    ระบบประสาทรับรสแบบสมองสองซีก V15.3 (File 42 Record Winner Core + Dynamic TK Support):
+    - ยึดโครงสร้างของไฟล์ 42 (ที่ทำกำไร +$3,228.84 / WR 53.45% / MaxDD 2.12%) เป็นแกนหลัก 100%
+    - เสริมความแม่นยำด้วยการจัดเรียงตัวของเส้น Dynamic Tenkan-sen และ Kijun-sen
+    """
+    atr_ratio = float(bar.get("atr_ratio", 1.0))
+    chop_v = float(bar.get("chop", 50.0))
+    prev_z = float(prev.get("fast_z", 0.0))
+    kama_slope = float(bar.get("kama_slope", 0.0))
+    p_accel = float(bar.get("price_accel", 0.0))
 
-def compute_hilbert_dominant_cycle(price_arr, min_p=10, max_p=28):
-    n = len(price_arr)
-    smooth = np.zeros(n)
-    detrender = np.zeros(n)
-    I1 = np.zeros(n)
-    Q1 = np.zeros(n)
-    jI = np.zeros(n)
-    jQ = np.zeros(n)
-    I2 = np.zeros(n)
-    Q2 = np.zeros(n)
-    Re = np.zeros(n)
-    Im = np.zeros(n)
-    period = np.full(n, 14.0)
-    smooth_period = np.full(n, 14.0)
+    close_p = float(bar["close"])
+    high_p = float(bar["high"])
+    low_p = float(bar["low"])
+    struct_h = float(bar.get("struct_high", high_p))
+    struct_l = float(bar.get("struct_low", low_p))
+    tenkan_p = float(bar.get("tenkan", close_p))
+    kijun_p = float(bar.get("kijun", close_p))
 
-    for i in range(6, n):
-        smooth[i] = (4.0 * price_arr[i] + 3.0 * price_arr[i - 1] + 2.0 * price_arr[i - 2] + price_arr[i - 3]) / 10.0
-        adj = 0.075 * period[i - 1] + 0.54
-        detrender[i] = (0.0962 * smooth[i] + 0.5769 * smooth[i - 2] - 0.5769 * smooth[i - 4] - 0.0962 * smooth[i - 6]) * adj
-        Q1[i] = (0.0962 * detrender[i] + 0.5769 * detrender[i - 2] - 0.5769 * detrender[i - 4] - 0.0962 * detrender[i - 6]) * adj
-        I1[i] = detrender[i - 3]
-        jI[i] = (0.0962 * I1[i] + 0.5769 * I1[i - 2] - 0.5769 * I1[i - 4] - 0.0962 * I1[i - 6]) * adj
-        jQ[i] = (0.0962 * Q1[i] + 0.5769 * Q1[i - 2] - 0.5769 * Q1[i - 4] - 0.0962 * Q1[i - 6]) * adj
-        I2[i] = 0.2 * (I1[i] - jQ[i]) + 0.8 * I2[i - 1]
-        Q2[i] = 0.2 * (Q1[i] + jI[i]) + 0.8 * Q2[i - 1]
-        Re[i] = 0.2 * (I2[i] * I2[i - 1] + Q2[i] * Q2[i - 1]) + 0.8 * Re[i - 1]
-        Im[i] = 0.2 * (I2[i] * Q2[i - 1] - Q2[i] * I2[i - 1]) + 0.8 * Im[i - 1]
+    h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
+    h1_bear = float(bar["h1_close"]) < float(bar["h1_ema"])
+    h4_bull = float(bar["h4_close"]) >= float(bar["h4_ema"])
+    h4_bear = float(bar["h4_close"]) < float(bar["h4_ema"])
+    mtf_aligned = (h1_bull and h4_bull) or (h1_bear and h4_bear)
 
-        raw_p = period[i - 1]
-        if abs(Im[i]) > 1e-9 and abs(Re[i]) > 1e-9:
-            angle = np.arctan2(Im[i], Re[i])
-            if abs(angle) > 0.01:
-                raw_p = (2.0 * np.pi) / abs(angle)
-        raw_p = np.clip(raw_p, 0.67 * period[i - 1], 1.5 * period[i - 1])
-        raw_p = np.clip(raw_p, float(min_p), float(max_p))
-        period[i] = 0.2 * raw_p + 0.8 * period[i - 1]
-        smooth_period[i] = 0.33 * period[i] + 0.67 * smooth_period[i - 1]
+    has_macro_expansion = bool(bar.get("macro_bull_conv", False)) or bool(bar.get("macro_bear_conv", False))
 
-    return np.rint(smooth_period).astype(int)
+    # 1. รสขม (BITTER): ตลาดผันผวนกระชากผิดธรรมชาติ หรือตลาดไร้สภาพคล่อง
+    if atr_ratio > 1.82 or atr_ratio < 0.48:
+        return "BITTER", {"reason": "TOXIC_VOLATILITY"}
 
-def compute_all_features(df):
-    d = df.copy()
-    d["thai_dt"] = d["datetime"] + pd.Timedelta(hours=7)
-    # แก้บั๊ก Midnight Lockout: ใช้วันทำการของเซสชัน (ตัดวันใหม่ตอน 04:00 น. หลังปิด Rollover 03:00 น.)
-    # เพื่อไม่ให้ออเดอร์ที่ปิดระหว่าง 00:00 - 03:00 น. ไปล็อกโควตาของวันรุ่งขึ้น!
-    d["thai_date"] = (d["thai_dt"] - pd.Timedelta(hours=4)).dt.date
-    d["thai_hour"] = d["thai_dt"].dt.hour
-    d["thai_minute"] = d["thai_dt"].dt.minute
-    d["thai_mins"] = d["thai_hour"] * 60 + d["thai_minute"]
+    ref_high = max(float(asian_high), struct_h) if (asian_bars >= 8 and asian_high > asian_low) else struct_h
+    ref_low = min(float(asian_low), struct_l) if (asian_bars >= 8 and asian_high > asian_low) else struct_l
 
-    # 1. True Range, ATR & Relative Volatility Ratio
-    prev_c = d["close"].shift(1)
-    tr = pd.concat([
-        (d["high"] - d["low"]).abs(),
-        (d["high"] - prev_c).abs(),
-        (d["low"] - prev_c).abs()
-    ], axis=1).max(axis=1)
-    d["atr"] = tr.ewm(alpha=1 / ATR_LEN, adjust=False).mean()
-    d["atr_base"] = d["atr"].rolling(100, min_periods=20).mean()
-    d["atr_ratio"] = (d["atr"] / d["atr_base"]).fillna(1.0)
+    # 2. รสเปรี้ยว (SOUR): แชมป์ทำเงินอันดับ 1 ในไฟล์ 42 (+$3,809.24 / WR 67.74%)
+    if (ref_high > ref_low) and (atr_ratio <= 1.30):
+        raw_swept_low = ((low_p < ref_low) or (float(prev["low"]) < ref_low)) and (close_p > ref_low)
+        raw_swept_high = ((high_p > ref_high) or (float(prev["high"]) > ref_high)) and (close_p < ref_high)
 
-    # 2. Hilbert Dominant Cycle (P_t), Adaptive CHOP, Structure Box & Dynamic Tenkan/Kijun
-    hl2 = ((d["high"] + d["low"]) / 2.0).values
-    dom_cycle = compute_hilbert_dominant_cycle(hl2, min_p=10, max_p=28)
-    d["dom_cycle"] = dom_cycle
+        left_sour_low = raw_swept_low and (atr_ratio <= 1.25) and (p_accel >= 0.08)
+        left_sour_high = raw_swept_high and (atr_ratio <= 1.25) and (p_accel <= -0.08)
 
-    high_arr = d["high"].values
-    low_arr = d["low"].values
-    close_arr = d["close"].values
-    tr_arr = tr.values
-    n = len(d)
+        has_asian = (asian_bars >= 8) and (asian_high > asian_low)
+        right_sour_low = has_asian and ((low_p < float(asian_low)) or (float(prev["low"]) < float(asian_low))) and (close_p > float(asian_low)) and (p_accel > 0.0)
+        right_sour_high = has_asian and ((high_p > float(asian_high)) or (float(prev["high"]) > float(asian_high))) and (close_p < float(asian_high)) and (p_accel < 0.0)
 
-    chop_arr = np.full(n, 50.0)
-    er_arr = np.full(n, 0.30)
-    struct_high_arr = np.zeros(n)
-    struct_low_arr = np.zeros(n)
-    tenkan_arr = np.zeros(n)
-    kijun_arr = np.zeros(n)
+        if left_sour_low or left_sour_high or right_sour_low or right_sour_high:
+            return "SOUR", {
+                "swept_low": (left_sour_low or right_sour_low),
+                "swept_high": (left_sour_high or right_sour_high),
+                "hemisphere": "L" if (left_sour_low or left_sour_high) else "R"
+            }
 
-    for i in range(n):
-        p = int(dom_cycle[i])
-        t_len = max(5, int(round(0.5 * p)))
-        k_len = max(13, int(round(1.5 * p)))
+    # 3. รสเค็ม (SALTY): สมองซีกซ้ายคุมกรอบไซด์เวย์ (CHOP >= 50 & |prev_z| >= 1.55 -> +$762.89 ในไฟล์ 42)
+    if (not has_macro_expansion) and (chop_v >= 50.0) and (abs(prev_z) >= 1.55):
+        return "SALTY", {
+            "prev_z": prev_z,
+            "hemisphere": "L"
+        }
 
-        if i <= k_len:
-            struct_high_arr[i] = high_arr[i]
-            struct_low_arr[i] = low_arr[i]
-            tenkan_arr[i] = close_arr[i]
-            kijun_arr[i] = close_arr[i]
-            continue
+    # 4. รสหวาน (SWEET): ประสานสมองซีกซ้าย + ซีกขวา พร้อมค่า Dynamic Tenkan/Kijun
+    if (chop_v < 54.0) and mtf_aligned:
+        return "SWEET", {
+            "bull_trend": (h1_bull and h4_bull),
+            "bear_trend": (h1_bear and h4_bear),
+            "tk_bull": (tenkan_p >= kijun_p),
+            "tk_bear": (tenkan_p <= kijun_p),
+            "chop": chop_v,
+            "kama_slope": kama_slope,
+            "atr_ratio": atr_ratio,
+            "has_macro_expansion": has_macro_expansion
+        }
 
-        sum_tr = np.sum(tr_arr[i - p + 1 : i + 1])
-        hl_range = max(np.max(high_arr[i - p + 1 : i + 1]) - np.min(low_arr[i - p + 1 : i + 1]), 1e-9)
-        chop_arr[i] = np.clip(100.0 * np.log10(max(sum_tr / hl_range, 1.0)) / np.log10(float(p)), 0.0, 100.0)
-
-        net_chg = abs(close_arr[i] - close_arr[i - p])
-        sum_abs = np.sum(np.abs(np.diff(close_arr[i - p : i + 1])))
-        er_arr[i] = net_chg / (sum_abs + 1e-9)
-
-        struct_high_arr[i] = np.max(high_arr[i - p : i])
-        struct_low_arr[i] = np.min(low_arr[i - p : i])
-
-        tenkan_arr[i] = 0.5 * (np.max(high_arr[i - t_len + 1 : i + 1]) + np.min(low_arr[i - t_len + 1 : i + 1]))
-        kijun_arr[i] = 0.5 * (np.max(high_arr[i - k_len + 1 : i + 1]) + np.min(low_arr[i - k_len + 1 : i + 1]))
-
-    d["chop"] = chop_arr
-    d["er"] = er_arr
-    d["struct_high"] = struct_high_arr
-    d["struct_low"] = struct_low_arr
-    d["tenkan"] = tenkan_arr
-    d["kijun"] = kijun_arr
-
-    # 3. KAMA & แคลคูลัสอนุพันธ์ (Slope & Acceleration)
-    kama = np.zeros(n)
-    kama[0] = close_arr[0]
-    fast_sc = 2.0 / (3.0 + 1.0)
-    slow_sc = 2.0 / (30.0 + 1.0)
-    for i in range(1, n):
-        sc = (er_arr[i] * (fast_sc - slow_sc) + slow_sc) ** 2
-        kama[i] = kama[i - 1] + sc * (close_arr[i] - kama[i - 1])
-    d["kama"] = kama
-    d["kama_slope"] = (d["kama"] - d["kama"].shift(1)) / (d["atr"] + 1e-9)
-    d["price_vel"] = (d["close"] - d["close"].shift(1)) / (d["atr"] + 1e-9)
-    d["price_accel"] = d["price_vel"] - d["price_vel"].shift(1)
-
-    # 4. Exact Session VWAP & VWRSI
-    tp = (d["high"] + d["low"] + d["close"]) / 3.0
-    pseudo_vol = (tr / d["atr"]).fillna(1.0).clip(0.3, 4.0)
-    d["session_id"] = (d["thai_dt"] - pd.Timedelta(hours=8)).dt.date
-    d["pv"] = tp * pseudo_vol
-    d["pvol"] = pseudo_vol
-    d["cum_pv"] = d.groupby("session_id")["pv"].cumsum()
-    d["cum_vol"] = d.groupby("session_id")["pvol"].cumsum()
-    d["vwap"] = d["cum_pv"] / d["cum_vol"]
-
-    delta = d["close"].diff()
-    up = np.where(delta > 0, delta * pseudo_vol, 0.0)
-    down = np.where(delta < 0, (-delta) * pseudo_vol, 0.0)
-    roll_up = pd.Series(up, index=d.index).ewm(alpha=1 / VWRSI_LEN, adjust=False).mean()
-    roll_down = pd.Series(down, index=d.index).ewm(alpha=1 / VWRSI_LEN, adjust=False).mean()
-    rs = roll_up / (roll_down + 1e-12)
-    d["vwrsi"] = 100.0 - (100.0 / (1.0 + rs))
-
-    # 5. Macro & Fast Z-Score
-    d["macro_mean"] = d["close"].rolling(96).mean()
-    d["macro_std"] = d["close"].rolling(96).std()
-    d["macro_z"] = (d["close"] - d["macro_mean"]) / (d["macro_std"] + 1e-12)
-
-    d["fast_mean"] = d["close"].rolling(20).mean()
-    d["fast_std"] = d["close"].rolling(20).std()
-    d["fast_z"] = (d["close"] - d["fast_mean"]) / (d["fast_std"] + 1e-12)
-
-    # 6. Multi-Timeframe H1 & H4 Trend Alignment
-    d_idx = d.set_index("datetime")
-    h1 = d_idx["close"].resample("1h").last().dropna()
-    h1_ema = h1.ewm(span=H1_EMA_LEN, adjust=False).mean()
-    h1_df = pd.DataFrame({"h1_close": h1, "h1_ema": h1_ema}).shift(1)
-
-    h4 = d_idx["close"].resample("4h").last().dropna()
-    h4_ema = h4.ewm(span=21, adjust=False).mean()
-    h4_df = pd.DataFrame({"h4_close": h4, "h4_ema": h4_ema}).shift(1)
-
-    merged = pd.merge_asof(d.sort_values("datetime"), h1_df.reset_index().sort_values("datetime"), on="datetime", direction="backward")
-    merged = pd.merge_asof(merged.sort_values("datetime"), h4_df.reset_index().sort_values("datetime"), on="datetime", direction="backward")
-    return merged.reset_index(drop=True)
+    return "BITTER", {"reason": "NO_DISTINCT_FLAVOR"}

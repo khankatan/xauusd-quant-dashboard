@@ -7,13 +7,13 @@ from datetime import datetime, timezone
 
 from engine.config import (
     INITIAL_CAPITAL, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R,
-    LATE_BE_TRIGGER_R, TRADES_CSV, STATE_JSON
+    PARTIAL_TP_RATIO, BE_BUFFER_ATR, LATE_BE_TRIGGER_R, TRADES_CSV, STATE_JSON
 )
 from engine.data_feed import fetch_market_data
 from engine.indicators import compute_all_features
 from engine.macro_oi import fetch_macro_oi_and_dxy
 from engine.strategy_brain import evaluate_signals
-from engine.risk_manager import RiskGuard
+from engine.risk_manager import RiskGuard, get_agent_sl_tp_mult
 
 os.makedirs("data", exist_ok=True)
 
@@ -81,43 +81,66 @@ def run_modular_engine():
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
         is_late_night = (t_mins >= 23 * 60 + 30) or (t_mins < 3 * 60)
 
-        # หากมีออเดอร์ถืออยู่ ให้บริหารออเดอร์ในแท่งนี้จนจบ
+        # บริหารออเดอร์ที่กำลังถืออยู่ (รองรับการแบ่งปิดกำไร 50% ที่ TP1 + กันหน้าทุน 0.08 ATR เดิม)
         if pos is not None:
             exit_price = None
             exit_reason = None
             sl_dist = pos.get("sl_dist", pos["atr"] * SL_ATR_MULT)
+            tag_prefix = f"{pos['agent']}{pos['conv']}"
 
             if pos["type"] == "BUY":
                 fav_r = (float(bar["high"]) - pos["entry"]) / sl_dist if sl_dist > 0 else 0.0
                 pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                if not pos["is_be"]:
-                    if (bar["high"] >= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
-                        pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * 0.45))
-                        pos["is_be"] = True
-
-                if bar["low"] <= pos["sl"]:
+                # 1. เช็กว่าชน SL ก่อนหรือไม่ในแท่งนี้
+                if float(bar["low"]) <= pos["sl"]:
                     exit_price = pos["sl"]
-                    exit_reason = f"{pos['agent']}{pos['conv']}-BE+" if pos["is_be"] else f"{pos['agent']}{pos['conv']}-SL"
-                elif bar["high"] >= pos["tp"]:
-                    exit_price = pos["tp"]
-                    exit_reason = f"{pos['agent']}{pos['conv']}-TP"
-                elif friday_close_now:
-                    exit_price = float(bar["close"])
-                    exit_reason = "Weekend-Close"
-                elif daily_rollover_now:
-                    exit_price = float(bar["close"])
-                    exit_reason = "Rollover"
+                    if pos["partial_closed"]:
+                        exit_reason = f"{tag_prefix}-TP1+BE+"
+                    elif pos["is_be"]:
+                        exit_reason = f"{tag_prefix}-BE+"
+                    else:
+                        exit_reason = f"{tag_prefix}-SL"
+
+                else:
+                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ +0.08 ATR เดิม)
+                    if (not pos["partial_closed"]) and (float(bar["high"]) >= pos["tp1"]):
+                        closed_oz = pos["oz"] * pos["partial_ratio"]
+                        pos["rem_oz"] = pos["oz"] - closed_oz
+                        pos["partial_pnl"] = ((pos["tp1"] - pos["entry"]) * closed_oz) - (pos["comm"] * pos["partial_ratio"])
+                        pos["partial_closed"] = True
+                        pos["is_be"] = True
+                        pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * BE_BUFFER_ATR))
+
+                    # กรณีดึกหลัง 23:30 น. ถ้าราคาบวกเกิน 0.65 R แต่ยังไม่ถึง TP1 ให้ยก SL บังทุนที่ +0.08 ATR
+                    elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
+                        pos["is_be"] = True
+                        pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * BE_BUFFER_ATR))
+
+                    # 3. เช็กการแตะเป้าใหญ่ TP2 (สำหรับ Lot 50% ที่เหลือ) หรือปิดตามเวลาตลาด
+                    if float(bar["high"]) >= pos["tp"]:
+                        exit_price = pos["tp"]
+                        exit_reason = f"{tag_prefix}-TP1+TP2" if pos["partial_closed"] else f"{tag_prefix}-TP"
+                    elif friday_close_now:
+                        exit_price = float(bar["close"])
+                        exit_reason = f"{tag_prefix}-TP1+Wknd" if pos["partial_closed"] else "Weekend-Close"
+                    elif daily_rollover_now:
+                        exit_price = float(bar["close"])
+                        exit_reason = f"{tag_prefix}-TP1+Rollover" if pos["partial_closed"] else "Rollover"
 
                 if exit_price is not None:
-                    net_pnl = ((exit_price - pos["entry"]) * pos["oz"]) - pos["comm"]
+                    rem_ratio = pos["rem_oz"] / pos["oz"] if pos["oz"] > 0 else 1.0
+                    rem_pnl = ((exit_price - pos["entry"]) * pos["rem_oz"]) - (pos["comm"] * rem_ratio)
+                    net_pnl = pos["partial_pnl"] + rem_pnl
+                    eff_exit = (pos["tp1"] * pos["partial_ratio"] + exit_price * rem_ratio) if pos["partial_closed"] else exit_price
+
                     guard.record_close(net_pnl, exit_reason)
                     guard.on_new_bar(bar_date)
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
                         "entry_time": pos["entry_time"], "exit_time": now_ts,
                         "entry_hour_utc": pos["entry_hour"], "type": "BUY",
-                        "entry": round(pos["entry"], 2), "exit": round(exit_price, 2),
+                        "entry": round(pos["entry"], 2), "exit": round(eff_exit, 2),
                         "pnl": round(net_pnl, 2), "reason": exit_reason
                     })
                     pos = None
@@ -126,49 +149,64 @@ def run_modular_engine():
                 fav_r = (pos["entry"] - float(bar["low"])) / sl_dist if sl_dist > 0 else 0.0
                 pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                if not pos["is_be"]:
-                    if (bar["low"] <= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
-                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * 0.45))
-                        pos["is_be"] = True
-
-                if bar["high"] >= pos["sl"]:
+                # 1. เช็กว่าชน SL ก่อนหรือไม่ในแท่งนี้
+                if float(bar["high"]) >= pos["sl"]:
                     exit_price = pos["sl"]
-                    exit_reason = f"{pos['agent']}{pos['conv']}-BE+" if pos["is_be"] else f"{pos['agent']}{pos['conv']}-SL"
-                elif bar["low"] <= pos["tp"]:
-                    exit_price = pos["tp"]
-                    exit_reason = f"{pos['agent']}{pos['conv']}-TP"
-                elif friday_close_now:
-                    exit_price = float(bar["close"])
-                    exit_reason = "Weekend-Close"
-                elif daily_rollover_now:
-                    exit_price = float(bar["close"])
-                    exit_reason = "Rollover"
+                    if pos["partial_closed"]:
+                        exit_reason = f"{tag_prefix}-TP1+BE+"
+                    elif pos["is_be"]:
+                        exit_reason = f"{tag_prefix}-BE+"
+                    else:
+                        exit_reason = f"{tag_prefix}-SL"
+
+                else:
+                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ -0.08 ATR เดิม)
+                    if (not pos["partial_closed"]) and (float(bar["low"]) <= pos["tp1"]):
+                        closed_oz = pos["oz"] * pos["partial_ratio"]
+                        pos["rem_oz"] = pos["oz"] - closed_oz
+                        pos["partial_pnl"] = ((pos["entry"] - pos["tp1"]) * closed_oz) - (pos["comm"] * pos["partial_ratio"])
+                        pos["partial_closed"] = True
+                        pos["is_be"] = True
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
+
+                    elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
+                        pos["is_be"] = True
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
+
+                    # 3. เช็กการแตะเป้าใหญ่ TP2 (สำหรับ Lot 50% ที่เหลือ) หรือปิดตามเวลาตลาด
+                    if float(bar["low"]) <= pos["tp"]:
+                        exit_price = pos["tp"]
+                        exit_reason = f"{tag_prefix}-TP1+TP2" if pos["partial_closed"] else f"{tag_prefix}-TP"
+                    elif friday_close_now:
+                        exit_price = float(bar["close"])
+                        exit_reason = f"{tag_prefix}-TP1+Wknd" if pos["partial_closed"] else "Weekend-Close"
+                    elif daily_rollover_now:
+                        exit_price = float(bar["close"])
+                        exit_reason = f"{tag_prefix}-TP1+Rollover" if pos["partial_closed"] else "Rollover"
 
                 if exit_price is not None:
-                    net_pnl = ((pos["entry"] - exit_price) * pos["oz"]) - pos["comm"]
+                    rem_ratio = pos["rem_oz"] / pos["oz"] if pos["oz"] > 0 else 1.0
+                    rem_pnl = ((pos["entry"] - exit_price) * pos["rem_oz"]) - (pos["comm"] * rem_ratio)
+                    net_pnl = pos["partial_pnl"] + rem_pnl
+                    eff_exit = (pos["tp1"] * pos["partial_ratio"] + exit_price * rem_ratio) if pos["partial_closed"] else exit_price
+
                     guard.record_close(net_pnl, exit_reason)
                     guard.on_new_bar(bar_date)
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
                         "entry_time": pos["entry_time"], "exit_time": now_ts,
                         "entry_hour_utc": pos["entry_hour"], "type": "SELL",
-                        "entry": round(pos["entry"], 2), "exit": round(exit_price, 2),
+                        "entry": round(pos["entry"], 2), "exit": round(eff_exit, 2),
                         "pnl": round(net_pnl, 2), "reason": exit_reason
                     })
                     pos = None
 
-        # ใช้ elif เพื่อบังคับว่าต้องเป็นแท่งเทียนใหม่เท่านั้น (ไม่ยิงซ้ำทันทีในแท่งที่เพิ่งปิด TP)
-        # แล้วให้ลิ้นชิมรสและสมองคำนวณหาจุดเข้าใหม่ตามตรรกะปกติ
+        # เปิดออเดอร์ใหม่เฉพาะในแท่งเทียนถัดไปเมื่อมีสัญญาณจริงจากสมอง
         elif (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars)
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
-                pos = guard.build_order(
-                    sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv,
-                    swing_low=float(bar.get("swing_low", bar["low"])),
-                    swing_high=float(bar.get("swing_high", bar["high"])),
-                    atr_ratio=float(bar.get("atr_ratio", 1.0))
-                )
+                pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv)
 
         if i % 4 == 0:
             equity_curve.append({"time": now_ts, "value": round(guard.equity, 2)})
@@ -198,11 +236,12 @@ def run_modular_engine():
             "pf": round((gw / gl), 2) if gl > 0 else (9.99 if gw > 0 else 0.0)
         }
 
+    # แสดงสถิติบนการ์ด Dashboard รวมทั้งสถิติไม้ที่แบ่งปิดกำไรบางส่วน (TP1+)
     agents_breakdown = {
         "VWAP_PB": agent_stats(["SWEET"]),
         "EV_PB": agent_stats(["SOUR", "SALTY"]),
-        "OI_BOOSTED": agent_stats(["+OI"]),
-        "ROLLOVER": agent_stats(["Rollover", "Weekend-Close"])
+        "OI_BOOSTED": agent_stats(["TP1+"]),
+        "ROLLOVER": agent_stats(["Rollover", "Weekend-Close", "Wknd"])
     }
 
     win_rate = (len(winners) / total_trades * 100.0) if total_trades > 0 else 0.0
@@ -213,19 +252,57 @@ def run_modular_engine():
     net_pnl_pct = (net_pnl / INITIAL_CAPITAL) * 100.0
     avg_daily_pct = net_pnl_pct / total_mon_fri_days
 
+    # คำนวณสัญญาณสด (Live Signal) พร้อมแสดงสถานะหากมีออเดอร์กำลังถือรันอยู่ (ACTIVE / PARTIAL TP1 LOCKED)
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     curr_dt = curr["datetime"].to_pydatetime()
     sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars)
-    sig_type = sig_now if (sig_now and not must_close_for_weekend(curr_dt)) else "WAIT"
-    is_conv_now = (bool(curr["macro_bull_conv"]) if sig_type == "BUY" else bool(curr["macro_bear_conv"])) if sig_type != "WAIT" else False
 
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
-    sl_d = atr_now * SL_ATR_MULT
-    tp_d = atr_now * TP_ATR_MULT
-    active_risk_now = guard.get_active_risk_pct(is_conv_now)
-    lot_now = round((guard.equity * (active_risk_now / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
+
+    if sig_now and not must_close_for_weekend(curr_dt):
+        sig_type = sig_now
+        is_conv_now = bool(curr["macro_bull_conv"]) if sig_type == "BUY" else bool(curr["macro_bear_conv"])
+        sl_m, tp_m = get_agent_sl_tp_mult(agent_now)
+        sl_d = atr_now * sl_m
+        tp2_d = atr_now * tp_m
+        tp1_d = min(sl_d * BE_TRIGGER_R, tp2_d * 0.85)
+        active_risk_now = guard.get_active_risk_pct(is_conv_now)
+        lot_now = round((guard.equity * (active_risk_now / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
+        sig_payload = {
+            "type": sig_type,
+            "agent": f"{agent_now}{'+OI' if is_conv_now else ''} [TP1 50% @ {BE_TRIGGER_R}R]",
+            "risk_pct": active_risk_now,
+            "entry": round(entry_now, 2),
+            "sl": round(entry_now - sl_d if sig_type == "BUY" else entry_now + sl_d, 2),
+            "tp1": round(entry_now + tp1_d if sig_type == "BUY" else entry_now - tp1_d, 2),
+            "tp": round(entry_now + tp2_d if sig_type == "BUY" else entry_now - tp2_d, 2),
+            "be_trigger": round(entry_now + tp1_d if sig_type == "BUY" else entry_now - tp1_d, 2),
+            "lot_size": lot_now,
+            "partial_lot": round(lot_now * PARTIAL_TP_RATIO, 2)
+        }
+    elif pos is not None:
+        # กรณีไม่มีสัญญาณแท่งใหม่ แต่มีออเดอร์ที่กำลังถือรันอยู่ในตลาด -> โชว์สถานะออเดอร์และป้าย PARTIAL TP1 บน Dashboard!
+        status_badge = "🔥 TP1 (50%) LOCKED & BE+ ACTIVE" if pos["partial_closed"] else "⏳ HOLDING FOR TP1 (50%)"
+        sig_payload = {
+            "type": f"HOLD {pos['type']}",
+            "agent": f"{pos['agent']}{pos['conv']} | {status_badge}",
+            "risk_pct": pos["risk_pct"],
+            "entry": round(pos["entry"], 2),
+            "sl": round(pos["sl"], 2),
+            "tp1": round(pos["tp1"], 2),
+            "tp": round(pos["tp"], 2),
+            "be_trigger": round(pos["tp1"], 2),
+            "lot_size": round(pos["rem_oz"] / 100.0, 2)
+        }
+    else:
+        sig_payload = {
+            "type": "WAIT",
+            "agent": "SCANNING (50% TP1 + BE+ READY)",
+            "risk_pct": guard.get_active_risk_pct(False),
+            "entry": None, "sl": None, "tp1": None, "tp": None, "be_trigger": None, "lot_size": 0.0
+        }
 
     candles = [
         {"time": int(r["ts"]), "open": round(float(r["open"]), 2), "high": round(float(r["high"]), 2), "low": round(float(r["low"]), 2), "close": round(float(r["close"]), 2)}
@@ -236,13 +313,13 @@ def run_modular_engine():
         return 0.0 if (val is None or (isinstance(val, float) and math.isnan(val))) else round(float(val), 3)
 
     h1_txt = "H1 BULL" if curr["h1_close"] >= curr["h1_ema"] else "H1 BEAR"
-    dst_txt = "US-SUMMER (Close 03:00 TH | 1h Buffer)" if is_us_dst_active(curr_dt) else "US-WINTER (Close 03:00 TH | 2h Buffer)"
+    dst_txt = "US-SUMMER (Close 03:00 TH)" if is_us_dst_active(curr_dt) else "US-WINTER (Close 03:00 TH)"
     macro_txt = str(curr["macro_status"]) if "macro_status" in curr else "OI+DXY: STANDARD"
-    regime_label = f"{h1_txt} | {macro_txt} | {dst_txt}"
+    regime_label = f"{h1_txt} | CHOP: {clean_num(curr.get('chop', 50.0))} | {macro_txt} | {dst_txt}"
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_source": f"{source_name} + COMEX GC=F OI & DXY (CFD Mode)",
+        "data_source": f"{source_name} + COMEX GC=F OI & DXY (50% Scale-Out TP1 Mode)",
         "history_range": f"{df.iloc[0]['datetime'].strftime('%Y-%m-%d')} ถึง {df.iloc[-1]['datetime'].strftime('%Y-%m-%d')} ({total_mon_fri_days} วันทำการ)",
         "current_price": round(float(df.iloc[-1]["close"]), 2),
         "equity": round(guard.equity, 2),
@@ -251,16 +328,7 @@ def run_modular_engine():
         "fast_z": clean_num(curr["fast_z"]),
         "atr": round(atr_now, 2),
         "regime": regime_label,
-        "signal": {
-            "type": sig_type,
-            "agent": f"{agent_now}{'+OI' if is_conv_now else ''}" if sig_type != "WAIT" else "SCANNING",
-            "risk_pct": active_risk_now,
-            "entry": round(entry_now, 2) if sig_type != "WAIT" else None,
-            "sl": round(entry_now - sl_d if sig_type == "BUY" else entry_now + sl_d, 2) if sig_type != "WAIT" else None,
-            "tp": round(entry_now + tp_d if sig_type == "BUY" else entry_now - tp_d, 2) if sig_type != "WAIT" else None,
-            "be_trigger": round(entry_now + sl_d * BE_TRIGGER_R if sig_type == "BUY" else entry_now - sl_d * BE_TRIGGER_R, 2) if sig_type != "WAIT" else None,
-            "lot_size": lot_now
-        },
+        "signal": sig_payload,
         "backtest": {
             "net_pnl": round(net_pnl, 2),
             "net_pnl_pct": round(net_pnl_pct, 2),
@@ -287,7 +355,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V10.2 Clean Sensory Architecture Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}% | MaxDailyDD: {state['backtest']['max_daily_dd_pct']}%")
+    print(f"V14.3 Partial TP1 (50%) + BE+ Guard Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

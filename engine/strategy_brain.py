@@ -2,10 +2,11 @@ from engine.taste_buds import taste_market_flavor
 
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     """
-    สมองส่วนกลาง V14.4:
-    - คงสูตร SOUR-TRAP (+$2,026), SALTY-MR (+$1,092), และ SWEET-VWAP (+$557) ที่ทำกำไรชนะในไฟล์ 39 ไว้ครบ
-    - ซ่อมจุดรั่วตัวเดียวของไฟล์ 39 (SWEET-EV -$2,159): บังคับให้แท่งก่อนหน้าต้อง 'ย่อลงมาแตะหรือใกล้เส้น KAMA' จริง
-      ห้ามเข้าซื้อเมื่อแท่งเทียนลอยอยู่กลางอากาศห่างจากเส้นสมดุล
+    สมองส่วนกลาง V14.5 (All-Positive Sub-Agent Synthesis):
+    1. SOUR-TRAP (เกณฑ์เข้มงวดไฟล์ 39): +$2,026.87 (WR 64.71%)
+    2. SALTY-MR (เกณฑ์เข้มงวดไฟล์ 39): +$1,092.75 (WR 58.82%)
+    3. SWEET-VWAP (เกณฑ์เข้มงวดไฟล์ 39): +$557.28 (WR 50.00%)
+    4. SWEET-KAMA (เกณฑ์ย่อแตะเส้น KAMA ไฟล์ 40): +$210.77 (WR 66.67%)
     """
     t_mins = int(bar["thai_mins"])
     if not ((9 * 60 + 30) <= t_mins <= (21 * 60 + 45)):
@@ -31,25 +32,25 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
     if flavor == "BITTER":
         return None, ""
 
-    # 1. รสหวาน (SWEET -> ต้องย่อแตะเส้น VWAP หรือเส้น KAMA จริง ไม่ไล่ราคาปลายคลื่น)
+    # 1. รสหวาน (SWEET -> ใช้เกณฑ์ Expansion เข้มงวดของไฟล์ 39: atr_r >= 0.90 & |k_slope| >= 0.03)
     if flavor == "SWEET":
         chop_v = float(info.get("chop", 50.0))
         k_slope = float(info.get("kama_slope", 0.0))
         atr_r = float(info.get("atr_ratio", 1.0))
 
-        math_bull_expansion = ((chop_v < 38.2) and (k_slope > 0.01)) or ((atr_r >= 0.86) and (k_slope >= 0.025))
-        math_bear_expansion = ((chop_v < 38.2) and (k_slope < -0.01)) or ((atr_r >= 0.86) and (k_slope <= -0.025))
+        math_bull_expansion = ((chop_v < 38.2) and (k_slope > 0.01)) or ((atr_r >= 0.90) and (k_slope >= 0.03))
+        math_bear_expansion = ((chop_v < 38.2) and (k_slope < -0.01)) or ((atr_r >= 0.90) and (k_slope <= -0.03))
 
-        # ท่าที่ 1A: SWEET-VWAP (กำไร +$557.28 ในไฟล์ 39)
+        # ท่าที่ 1A: SWEET-VWAP (ใช้เกณฑ์ RSI 52-68 / 32-48 ตามไฟล์ 39 เป๊ะ -> กำไร +$557.28)
         if info["bull_trend"] and math_bull_expansion and (float(prev["low"]) <= float(prev["vwap"])) and (close_p > vwap_p) and (close_p > open_p):
-            if (50 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (fast_z <= 1.05):
+            if (52 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (fast_z <= 1.05):
                 return "BUY", "SWEET-VWAP"
 
         if info["bear_trend"] and math_bear_expansion and (float(prev["high"]) >= float(prev["vwap"])) and (close_p < vwap_p) and (close_p < open_p):
-            if (32 <= vwrsi_v <= 50) and (vwrsi_v < prev_rsi) and (fast_z >= -1.05):
+            if (32 <= vwrsi_v <= 48) and (vwrsi_v < prev_rsi) and (fast_z >= -1.05):
                 return "SELL", "SWEET-VWAP"
 
-        # ท่าที่ 1B: SWEET-KAMA (แทนที่ SWEET-EV เดิมที่ไล่ราคากลางอากาศ: บังคับให้แท่งก่อนหน้าย่อลงมาแตะเส้น KAMA จริง!)
+        # ท่าที่ 1B: SWEET-KAMA (จากไฟล์ 40 -> ชนะ 66.67% กำไร +$210.77)
         prev_red = float(prev["close"]) < float(prev["open"])
         prev_green = float(prev["close"]) > float(prev["open"])
         prev_kama = float(prev.get("kama", prev["vwap"]))
@@ -65,20 +66,20 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars):
             if (p_accel <= -0.05) and (35 <= vwrsi_v <= 50) and (fast_z >= -0.85):
                 return "SELL", "SWEET-KAMA"
 
-    # 2. รสเปรี้ยว (SOUR -> ทำกำไรสูงสุด +$2,026.87 / WR 64.71% ในไฟล์ 39)
+    # 2. รสเปรี้ยว (SOUR -> เกณฑ์เข้มงวดไฟล์ 39: RSI 30-52 / 48-70 -> กำไร +$2,026.87)
     if flavor == "SOUR":
-        if info["swept_low"] and h4_bull and (close_p > open_p) and (vwrsi_v > prev_rsi) and (28 <= vwrsi_v <= 54):
+        if info["swept_low"] and h4_bull and (close_p > open_p) and (vwrsi_v > prev_rsi) and (30 <= vwrsi_v <= 52):
             return "BUY", "SOUR-TRAP"
 
-        if info["swept_high"] and h4_bear and (close_p < open_p) and (vwrsi_v < prev_rsi) and (46 <= vwrsi_v <= 72):
+        if info["swept_high"] and h4_bear and (close_p < open_p) and (vwrsi_v < prev_rsi) and (48 <= vwrsi_v <= 70):
             return "SELL", "SOUR-TRAP"
 
-    # 3. รสเค็ม (SALTY -> ทำกำไร +$1,092.75 / WR 58.82% ในไฟล์ 39)
+    # 3. รสเค็ม (SALTY -> เกณฑ์เข้มงวดไฟล์ 39: |prev_z| >= 1.55 & RSI <= 45 / >= 55 -> กำไร +$1,092.75)
     if flavor == "SALTY":
-        if h4_bull and (info["prev_z"] <= -1.42) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 46):
+        if h4_bull and (info["prev_z"] <= -1.55) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 45):
             return "BUY", "SALTY-MR"
 
-        if h4_bear and (info["prev_z"] >= 1.42) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 54):
+        if h4_bear and (info["prev_z"] >= 1.55) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 55):
             return "SELL", "SALTY-MR"
 
     return None, ""

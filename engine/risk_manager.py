@@ -7,18 +7,17 @@ from engine.config import (
 
 def compute_structural_sl_tp(direction, agent_tag, entry_price, atr_val, swing_low, swing_high, atr_ratio):
     """
-    ขั้นตอนที่ 4B: คำนวณจุดตัดขาดทุนและเป้าหมายกำไรจากโครงสร้างราคาจริง (Swing Structure + Vol-Scaled Buffer)
-    - Vol-Scaled Multiplier: ขยายระยะ Buffer เมื่อความผันผวนสูง (ข่าวแรง) และหดแคบลงเมื่อตลาดปกติ
-    - Structural Buffer: วาง SL ไว้ใต้ Swing Low (สำหรับ BUY) หรือเหนือ Swing High (สำหรับ SELL) บวกด้วย ATR Buffer
+    คำนวณจุดตัดขาดทุนและเป้าหมายกำไรจากโครงสร้างราคาจริง (Swing Structure + Vol-Scaled Buffer)
+    ปรับระยะเพดาน SL และ RR Target ให้พอดีกับระยะวิ่งจริงของวัฏจักร M15 (ไม่ตั้งเป้าไกลเกินจนราคาเลี้ยวกลับก่อน)
     """
-    vol_scale = float(np.clip(atr_ratio, 0.85, 1.35))
+    vol_scale = float(np.clip(atr_ratio, 0.85, 1.30))
 
     if "SALTY" in agent_tag:
-        buf_mult, min_sl_m, max_sl_m, rr_target = 0.75 * vol_scale, 1.5, 2.3, 1.25
+        buf_mult, min_sl_m, max_sl_m, rr_target = 0.65 * vol_scale, 1.4, 2.0, 1.20
     elif "SOUR" in agent_tag:
-        buf_mult, min_sl_m, max_sl_m, rr_target = 0.85 * vol_scale, 1.7, 2.5, 1.40
+        buf_mult, min_sl_m, max_sl_m, rr_target = 0.80 * vol_scale, 1.6, 2.3, 1.40
     else:  # SWEET-TREND
-        buf_mult, min_sl_m, max_sl_m, rr_target = 1.00 * vol_scale, 1.9, 2.8, 1.60
+        buf_mult, min_sl_m, max_sl_m, rr_target = 0.85 * vol_scale, 1.6, 2.2, 1.35
 
     if direction == "BUY":
         raw_struct_sl = float(swing_low) - (atr_val * buf_mult)
@@ -132,7 +131,7 @@ class RiskGuard:
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
-                "be_trigger": entry_price + (sl_dist * BE_TRIGGER_R),
+                "be_trigger": entry_price + (sl_dist * 0.95),
                 "sl_dist": sl_dist,
                 "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }
@@ -142,7 +141,7 @@ class RiskGuard:
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
                 "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,
-                "be_trigger": entry_price - (sl_dist * BE_TRIGGER_R),
+                "be_trigger": entry_price - (sl_dist * 0.95),
                 "sl_dist": sl_dist,
                 "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
             }

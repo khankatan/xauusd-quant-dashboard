@@ -199,7 +199,7 @@ def run_modular_engine():
 
                     elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
                         pos["is_be"] = True
-                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (sl_dist * BE_BUFFER_ATR))
 
                     if float(bar["low"]) <= pos["tp"]:
                         exit_price = pos["tp"]

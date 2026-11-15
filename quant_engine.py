@@ -165,7 +165,6 @@ def run_modular_engine():
                     is_sl_hit = ("-SL" in exit_reason) or (net_pnl < 0)
                     guard.record_close(net_pnl, exit_reason, pos["agent"])
                     
-                    # ถ้าออเดอร์โดน SL ให้ปลดล็อกส่งไม้ต่อให้ Advisor เข้ามาทำงานกู้ชีพทันที
                     if is_sl_hit:
                         guard.today_loss_locked = True
 
@@ -247,11 +246,9 @@ def run_modular_engine():
                     })
                     pos = None
 
-        # ระบบเลือกสมองประเมินสัญญาณเทรนด์
         elif (not friday_close_now) and (not daily_rollover_now):
             sig_dir, agent_tag = None, ""
             
-            # ถ้าวันนี้ระบบหลักโดน SL และ Advisor ยังไม่เคยเทรดในวันนี้ -> เรียก Advisor เข้ามาทำหน้าที่กู้ชีพ
             if guard.today_loss_locked and not advisor_traded_today[bar_date]:
                 sig_dir, agent_tag = evaluate_advisor_recovery_signal(bar, prev, float(bar["atr"]))
                 if sig_dir is not None:
@@ -369,7 +366,7 @@ def run_modular_engine():
             "type": "WAIT",
             "agent": "SCANNING (V19.2 SL-RECOVERY DUAL-BRAIN)",
             "risk_pct": guard.get_active_risk_pct(False, "", atr_now, curr_utc_h),
-            "entry": null, "sl": null, "tp1": null, "tp": null, "be_trigger": null, "lot_size": 0.0
+            "entry": None, "sl": None, "tp1": None, "tp": None, "be_trigger": None, "lot_size": 0.0
         }
 
     candles = [

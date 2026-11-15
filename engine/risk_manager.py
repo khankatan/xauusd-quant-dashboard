@@ -11,6 +11,8 @@ def get_agent_sl_tp_mult(agent_tag):
         return 1.8, 2.3   # รสเค็ม (ไซด์เวย์): SL 1.8 / TP2 2.3 ATR
     if "SOUR" in agent_tag:
         return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): SL 2.0 / TP2 2.8 ATR
+    if "FLIP-" in agent_tag:
+        return 2.0, 3.0   # สมองซีกขวา Judas Flip: SL 2.0 / TP2 3.0 ATR
     if "GAP-" in agent_tag:
         return 2.0, 2.8   # สมองซีกขวาเก็บตกรายวัน: SL 2.0 / TP2 2.8 ATR
     return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (เทรนด์): SL 2.0 / TP2 3.0 ATR
@@ -87,6 +89,8 @@ class RiskGuard:
     def get_active_risk_pct(self, is_macro_conv=False, agent_tag="", atr_val=0.0, utc_hour=0):
         is_crisis_vol = (atr_val > 11.5)
 
+        if "FLIP-" in agent_tag:
+            return 0.20 if is_crisis_vol else 0.35
         if "GAP-" in agent_tag:
             return 0.10 if is_crisis_vol else 0.25
 
@@ -94,12 +98,12 @@ class RiskGuard:
             base = THROTTLED_RISK_PCT
         else:
             if is_macro_conv and (utc_hour in [8, 9, 10, 13, 14]):
-                base = 0.52  # Prime Conviction Booster (+OI ในช่วง Prime London/NY Overlap)
+                base = 0.52
             else:
                 base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
 
         if is_crisis_vol:
-            base = round(base * 0.5, 4)  # Crisis Volatility Throttle (ลดความเสี่ยง 50% เมื่อ ATR > 11.5)
+            base = round(base * 0.5, 4)
 
         if self.trades_today >= 1:
             return round(base * 0.5, 4)
@@ -158,8 +162,7 @@ class RiskGuard:
     def record_close(self, net_pnl, exit_reason, agent_tag=""):
         self.equity += net_pnl
 
-        # แยกตัวนับแพ้ติดกัน (Isolated Loss Counter): ไม่ให้ไม้เก็บตก GAP-DAILY ไปลดขนาด Lot ของสมองหลัก
-        is_gap_agent = ("GAP-" in agent_tag) or ("GAP-" in exit_reason)
+        is_gap_agent = ("GAP-" in agent_tag) or ("GAP-" in exit_reason) or ("FLIP-" in agent_tag) or ("FLIP-" in exit_reason)
 
         if ("Rollover" in exit_reason or "Weekend-Close" in exit_reason or "-EOD" in exit_reason) and self.trades_today == 0:
             if not is_gap_agent:

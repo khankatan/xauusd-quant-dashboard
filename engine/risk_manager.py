@@ -13,6 +13,8 @@ def get_agent_sl_tp_mult(agent_tag):
         return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): SL 2.0 / TP2 2.8 ATR
     if "FLIP-" in agent_tag:
         return 2.0, 3.0   # สมองซีกขวา Judas Flip: SL 2.0 / TP2 3.0 ATR
+    if "ADVISOR-" in agent_tag:
+        return 2.0, 3.0   # สมองกลกู้ชีพ Advisor: SL 2.0 / TP2 3.0 ATR
     if "GAP-" in agent_tag:
         return 2.0, 2.8   # สมองซีกขวาเก็บตกรายวัน: SL 2.0 / TP2 2.8 ATR
     return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (เทรนด์): SL 2.0 / TP2 3.0 ATR
@@ -91,6 +93,8 @@ class RiskGuard:
 
         if "FLIP-" in agent_tag:
             return 0.20 if is_crisis_vol else 0.35
+        if "ADVISOR-" in agent_tag:
+            return 0.30
         if "GAP-" in agent_tag:
             return 0.10 if is_crisis_vol else 0.25
 
@@ -162,7 +166,7 @@ class RiskGuard:
     def record_close(self, net_pnl, exit_reason, agent_tag=""):
         self.equity += net_pnl
 
-        is_gap_agent = ("GAP-" in agent_tag) or ("GAP-" in exit_reason) or ("FLIP-" in agent_tag) or ("FLIP-" in exit_reason)
+        is_gap_agent = ("GAP-" in agent_tag) or ("GAP-" in exit_reason) or ("FLIP-" in agent_tag) or ("FLIP-" in exit_reason) or ("ADVISOR-" in agent_tag) or ("ADVISOR-" in exit_reason)
 
         if ("Rollover" in exit_reason or "Weekend-Close" in exit_reason or "-EOD" in exit_reason) and self.trades_today == 0:
             if not is_gap_agent:

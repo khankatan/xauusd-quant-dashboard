@@ -93,7 +93,7 @@ def run_modular_engine():
 
                 if not pos["is_be"]:
                     if (bar["high"] >= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
-                        pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * 0.08))
+                        pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * 0.45))
                         pos["is_be"] = True
 
                 if bar["low"] <= pos["sl"]:
@@ -128,7 +128,7 @@ def run_modular_engine():
 
                 if not pos["is_be"]:
                     if (bar["low"] <= pos["be_trigger"]) or (is_late_night and pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
-                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * 0.08))
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * 0.45))
                         pos["is_be"] = True
 
                 if bar["high"] >= pos["sl"]:

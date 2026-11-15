@@ -11,8 +11,8 @@ def get_agent_sl_tp_mult(agent_tag):
         return 1.8, 2.3   # รสเค็ม (ไซด์เวย์): SL 1.8 / TP2 2.3 ATR
     if "SOUR" in agent_tag:
         return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): SL 2.0 / TP2 2.8 ATR
-    if "FORCED" in agent_tag:
-        return 2.0, 3.2   # ไม้บังคับเก็บตกประจำวัน: SL 2.0 / TP2 3.2 ATR
+    if "GAP-" in agent_tag:
+        return 2.0, 2.8   # สมองซีกขวาเก็บตกรายวัน: SL 2.0 / TP2 2.8 ATR
     return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (เทรนด์): SL 2.0 / TP2 3.0 ATR
 
 class RiskGuard:
@@ -80,24 +80,32 @@ class RiskGuard:
             return False
         if self.trades_today == 0:
             return True
-        # กฎ H2 House Money Guard: ไม้สองต้องมี +OI และไม้แรกต้องมี +OI ด้วย
-        if HOUSE_MONEY_MODE and self.trades_today == 1 and self.tp_wins_today == 1:
-            if not self.first_trade_has_oi:
-                return False
+        if HOUSE_MONEY_MODE and (self.tp_wins_today == self.trades_today) and (self.trades_today < MAX_TRADES_PER_DAY):
             return True
         return False
 
-    def get_active_risk_pct(self, is_macro_conv=False):
+    def get_active_risk_pct(self, is_macro_conv=False, agent_tag="", atr_val=0.0, utc_hour=0):
+        is_crisis_vol = (atr_val > 11.5)
+
+        if "GAP-" in agent_tag:
+            return 0.10 if is_crisis_vol else 0.25
+
         if self.consecutive_losses >= 2:
             base = THROTTLED_RISK_PCT
         else:
-            base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
+            if is_macro_conv and (utc_hour in [8, 9, 10, 13, 14]):
+                base = 0.60  # Prime Conviction Booster (+OI ในช่วง Prime London/NY Overlap)
+            else:
+                base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
+
+        if is_crisis_vol:
+            base = round(base * 0.5, 4)  # Crisis Volatility Throttle (ลดความเสี่ยง 50% เมื่อ ATR > 11.5)
 
         if self.trades_today >= 1:
             return round(base * 0.5, 4)
         return base
 
-    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, **kwargs):
+    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, utc_hour=0, **kwargs):
         if self.trades_today == 0:
             self.first_trade_has_oi = is_macro_conv
 
@@ -107,7 +115,7 @@ class RiskGuard:
         if sl_dist <= 0:
             return None
 
-        risk_pct = self.get_active_risk_pct(is_macro_conv)
+        risk_pct = self.get_active_risk_pct(is_macro_conv, agent_tag, atr_val, utc_hour)
         risk_cash = self.equity * (risk_pct / 100.0)
         oz = risk_cash / sl_dist
         comm = oz * COMMISSION_PER_OZ * 2
@@ -116,7 +124,6 @@ class RiskGuard:
         conv_tag = "+OI" if is_macro_conv else ""
         step_tag = f"-H{self.trades_today}" if self.trades_today > 1 else ""
 
-        # คำนวณจุด TP1 (ระยะ 1.15 R สำหรับแบ่งปิดกำไร 50% แรก และยก SL บังหน้าทุนที่ 0.08 ATR เดิม)
         tp1_dist = min(sl_dist * BE_TRIGGER_R, tp_dist * 0.85)
 
         if direction == "BUY":
@@ -148,28 +155,31 @@ class RiskGuard:
                 "partial_ratio": PARTIAL_TP_RATIO, "max_fav_r": 0.0
             }
 
-    def record_close(self, net_pnl, exit_reason):
+    def record_close(self, net_pnl, exit_reason, agent_tag=""):
         self.equity += net_pnl
 
-        if ("Rollover" in exit_reason or "Weekend-Close" in exit_reason) and self.trades_today == 0:
-            if net_pnl < -20.0:
-                self.consecutive_losses += 1
-            elif net_pnl > 20.0:
-                self.consecutive_losses = 0
+        # แยกตัวนับแพ้ติดกัน (Isolated Loss Counter): ไม่ให้ไม้เก็บตก GAP-DAILY ไปลดขนาด Lot ของสมองหลัก
+        is_gap_agent = ("GAP-" in agent_tag) or ("GAP-" in exit_reason)
+
+        if ("Rollover" in exit_reason or "Weekend-Close" in exit_reason or "-EOD" in exit_reason) and self.trades_today == 0:
+            if not is_gap_agent:
+                if net_pnl < -20.0:
+                    self.consecutive_losses += 1
+                elif net_pnl > 20.0:
+                    self.consecutive_losses = 0
             return
 
-        # กรณีชน BE+ (ทั้งแบบแบ่งปิดกำไร TP1+BE+ หรือ Late-Night BE+): ล็อกกำไรวันนี้และรีเซ็ตสถิติแพ้ติดกัน
         if "BE+" in exit_reason:
             self.today_be_locked = True
-            if net_pnl > 20.0:
+            if (not is_gap_agent) and net_pnl > 20.0:
                 self.consecutive_losses = 0
             return
 
-        # กรณีชนะชนเป้าใหญ่ TP2 (-TP1+TP2 หรือ -TP): เปิดโควตา House Money ให้มองหาไม้ถัดไปได้
         if ("TP2" in exit_reason or exit_reason.endswith("-TP")) and net_pnl > 0:
             self.tp_wins_today += 1
-            self.consecutive_losses = 0
+            if not is_gap_agent:
+                self.consecutive_losses = 0
         else:
             self.today_loss_locked = True
-            if net_pnl < -20.0:
+            if (not is_gap_agent) and net_pnl < -20.0:
                 self.consecutive_losses += 1

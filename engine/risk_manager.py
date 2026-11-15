@@ -1,16 +1,34 @@
+import numpy as np
 from engine.config import (
     INITIAL_CAPITAL, BASE_RISK_PCT, CONVICTION_RISK_PCT, THROTTLED_RISK_PCT,
     DAILY_TARGET_PCT, HARD_DAILY_DD_PCT, MAX_TRADES_PER_DAY, STOP_ON_BE_PLUS,
     HOUSE_MONEY_MODE, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, COMMISSION_PER_OZ
 )
 
-def get_agent_sl_tp_mult(agent_tag):
-    """ปรับระยะ SL/TP ตามรสชาติของตลาดที่สมองเลือก"""
+def compute_structural_sl_tp(direction, agent_tag, entry_price, atr_val, swing_low, swing_high, atr_ratio):
+    """
+    ขั้นตอนที่ 4B: คำนวณจุดตัดขาดทุนและเป้าหมายกำไรจากโครงสร้างราคาจริง (Swing Structure + Vol-Scaled Buffer)
+    - Vol-Scaled Multiplier: ขยายระยะ Buffer เมื่อความผันผวนสูง (ข่าวแรง) และหดแคบลงเมื่อตลาดปกติ
+    - Structural Buffer: วาง SL ไว้ใต้ Swing Low (สำหรับ BUY) หรือเหนือ Swing High (สำหรับ SELL) บวกด้วย ATR Buffer
+    """
+    vol_scale = float(np.clip(atr_ratio, 0.85, 1.35))
+
     if "SALTY" in agent_tag:
-        return 1.8, 2.2   # รสเค็ม (ไซด์เวย์): เก็บกำไรไวในกรอบ
-    if "SOUR" in agent_tag:
-        return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): เก็บระยะดีดกลับปานกลาง
-    return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (SWEET 2.2 / 3.5): รันเทรนด์ยาวคำโต
+        buf_mult, min_sl_m, max_sl_m, rr_target = 0.75 * vol_scale, 1.5, 2.3, 1.25
+    elif "SOUR" in agent_tag:
+        buf_mult, min_sl_m, max_sl_m, rr_target = 0.85 * vol_scale, 1.7, 2.5, 1.40
+    else:  # SWEET-TREND
+        buf_mult, min_sl_m, max_sl_m, rr_target = 1.00 * vol_scale, 1.9, 2.8, 1.60
+
+    if direction == "BUY":
+        raw_struct_sl = float(swing_low) - (atr_val * buf_mult)
+        sl_dist = np.clip(entry_price - raw_struct_sl, atr_val * min_sl_m, atr_val * max_sl_m)
+    else:
+        raw_struct_sl = float(swing_high) + (atr_val * buf_mult)
+        sl_dist = np.clip(raw_struct_sl - entry_price, atr_val * min_sl_m, atr_val * max_sl_m)
+
+    tp_dist = sl_dist * rr_target
+    return float(sl_dist), float(tp_dist)
 
 class RiskGuard:
     def __init__(self, initial_capital=INITIAL_CAPITAL):
@@ -75,7 +93,6 @@ class RiskGuard:
             return False
         if self.trades_today == 0:
             return True
-        # เปิดสิทธิ์ให้สมองมองหาไม้ที่ 2 หรือ 3 เฉพาะเมื่อไม้ก่อนหน้าปิด TP เท่านั้น
         if HOUSE_MONEY_MODE and (self.tp_wins_today == self.trades_today) and (self.trades_today < MAX_TRADES_PER_DAY):
             return True
         return False
@@ -86,15 +103,17 @@ class RiskGuard:
         else:
             base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
 
-        # ไม้ที่ 2 และไม้ที่ 3 ใช้ความเสี่ยง 50% ของไม้แรกเท่ากัน
         if self.trades_today >= 1:
             return round(base * 0.5, 4)
         return base
 
-    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False):
-        sl_mult, tp_mult = get_agent_sl_tp_mult(agent_tag)
-        sl_dist = atr_val * sl_mult
-        tp_dist = atr_val * tp_mult
+    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, swing_low=None, swing_high=None, atr_ratio=1.0):
+        s_low = entry_price - atr_val if swing_low is None else float(swing_low)
+        s_high = entry_price + atr_val if swing_high is None else float(swing_high)
+
+        sl_dist, tp_dist = compute_structural_sl_tp(
+            direction, agent_tag, entry_price, atr_val, s_low, s_high, atr_ratio
+        )
         if sl_dist <= 0:
             return None
 

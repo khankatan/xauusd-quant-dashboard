@@ -50,7 +50,7 @@ def compute_all_features(df):
     d["thai_minute"] = d["thai_dt"].dt.minute
     d["thai_mins"] = d["thai_hour"] * 60 + d["thai_minute"]
 
-    # 1. True Range & ATR (ตามต้นฉบับ V7.7 และ V10.2)
+    # 1. True Range, ATR & Relative Volatility Ratio
     prev_c = d["close"].shift(1)
     tr = pd.concat([
         (d["high"] - d["low"]).abs(),
@@ -61,25 +61,58 @@ def compute_all_features(df):
     d["atr_base"] = d["atr"].rolling(100, min_periods=20).mean()
     d["atr_ratio"] = (d["atr"] / d["atr_base"]).fillna(1.0)
 
-    # 2. Hilbert Dominant Cycle & Adaptive CHOP (ใช้เป็นสวิตช์แยกเทรนด์ vs ไซด์เวย์)
+    # 2. Hilbert Dominant Cycle (P_t), Adaptive CHOP(P_t) & Adaptive KAMA
     hl2 = ((d["high"] + d["low"]) / 2.0).values
     dom_cycle = compute_hilbert_dominant_cycle(hl2, min_p=10, max_p=28)
     d["dom_cycle"] = dom_cycle
 
     high_arr = d["high"].values
     low_arr = d["low"].values
+    close_arr = d["close"].values
     tr_arr = tr.values
     n = len(d)
+
     chop_arr = np.full(n, 50.0)
+    er_arr = np.full(n, 0.30)
+    struct_high_arr = np.zeros(n)
+    struct_low_arr = np.zeros(n)
+
     for i in range(n):
         p = int(dom_cycle[i])
-        if i >= p:
-            sum_tr = np.sum(tr_arr[i - p + 1 : i + 1])
-            hl_range = max(np.max(high_arr[i - p + 1 : i + 1]) - np.min(low_arr[i - p + 1 : i + 1]), 1e-9)
-            chop_arr[i] = np.clip(100.0 * np.log10(max(sum_tr / hl_range, 1.0)) / np.log10(float(p)), 0.0, 100.0)
-    d["chop"] = chop_arr
+        if i <= p:
+            struct_high_arr[i] = high_arr[i]
+            struct_low_arr[i] = low_arr[i]
+            continue
+        sum_tr = np.sum(tr_arr[i - p + 1 : i + 1])
+        hl_range = max(np.max(high_arr[i - p + 1 : i + 1]) - np.min(low_arr[i - p + 1 : i + 1]), 1e-9)
+        chop_arr[i] = np.clip(100.0 * np.log10(max(sum_tr / hl_range, 1.0)) / np.log10(float(p)), 0.0, 100.0)
 
-    # 3. Exact Session VWAP & VWRSI (สูตรต้นฉบับที่ทำกำไรในไฟล์ 25, 26 และ 29)
+        net_chg = abs(close_arr[i] - close_arr[i - p])
+        sum_abs = np.sum(np.abs(np.diff(close_arr[i - p : i + 1])))
+        er_arr[i] = net_chg / (sum_abs + 1e-9)
+
+        struct_high_arr[i] = np.max(high_arr[i - p : i])
+        struct_low_arr[i] = np.min(low_arr[i - p : i])
+
+    d["chop"] = chop_arr
+    d["er"] = er_arr
+    d["struct_high"] = struct_high_arr
+    d["struct_low"] = struct_low_arr
+
+    # 3. KAMA & แคลคูลัสอนุพันธ์ (Slope & Acceleration) สำหรับกรองเทรนด์แท้โดยไม่ต้องพึ่งชั่วโมงเวลา
+    kama = np.zeros(n)
+    kama[0] = close_arr[0]
+    fast_sc = 2.0 / (3.0 + 1.0)
+    slow_sc = 2.0 / (30.0 + 1.0)
+    for i in range(1, n):
+        sc = (er_arr[i] * (fast_sc - slow_sc) + slow_sc) ** 2
+        kama[i] = kama[i - 1] + sc * (close_arr[i] - kama[i - 1])
+    d["kama"] = kama
+    d["kama_slope"] = (d["kama"] - d["kama"].shift(1)) / (d["atr"] + 1e-9)
+    d["price_vel"] = (d["close"] - d["close"].shift(1)) / (d["atr"] + 1e-9)
+    d["price_accel"] = d["price_vel"] - d["price_vel"].shift(1)
+
+    # 4. Exact Session VWAP & VWRSI
     tp = (d["high"] + d["low"] + d["close"]) / 3.0
     pseudo_vol = (tr / d["atr"]).fillna(1.0).clip(0.3, 4.0)
     d["session_id"] = (d["thai_dt"] - pd.Timedelta(hours=8)).dt.date
@@ -97,7 +130,7 @@ def compute_all_features(df):
     rs = roll_up / (roll_down + 1e-12)
     d["vwrsi"] = 100.0 - (100.0 / (1.0 + rs))
 
-    # 4. Macro & Fast Z-Score (สูตรเดียวกับไฟล์ 29 ที่ทำกำไรเดือน พ.ค., ส.ค., ต.ค.)
+    # 5. Macro & Fast Z-Score
     d["macro_mean"] = d["close"].rolling(96).mean()
     d["macro_std"] = d["close"].rolling(96).std()
     d["macro_z"] = (d["close"] - d["macro_mean"]) / (d["macro_std"] + 1e-12)
@@ -106,7 +139,7 @@ def compute_all_features(df):
     d["fast_std"] = d["close"].rolling(20).std()
     d["fast_z"] = (d["close"] - d["fast_mean"]) / (d["fast_std"] + 1e-12)
 
-    # 5. Multi-Timeframe H1 & H4 Trend Alignment
+    # 6. Multi-Timeframe H1 & H4 Trend Alignment
     d_idx = d.set_index("datetime")
     h1 = d_idx["close"].resample("1h").last().dropna()
     h1_ema = h1.ewm(span=H1_EMA_LEN, adjust=False).mean()

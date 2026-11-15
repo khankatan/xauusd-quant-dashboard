@@ -2,11 +2,10 @@ from engine.taste_buds import taste_market_flavor
 
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=0):
     """
-    สมองส่วนกลาง V15.1 (File 39 + File 42 Best-of-Both Synthesis):
-    1. เก็บ SOUR-TRAP (+$3,809), SWEET-VWAP (+$961), SALTY-MR (+$763) และ SWEET-KAMA BUY (+$77) จากไฟล์ 42 ไว้ครบ
-    2. ตัด SWEET-KAMA SELL (ที่แพ้ 8/9 ไม้ ขาดทุน -$2,487.10 ในไฟล์ 42) ทิ้งทันที!
-    3. คืนชีพท่า SWEET-EV SELL จากไฟล์ 39/37 (ที่ชนะ 69.2% ในวันที่ไฟล์ 42 เงียบ) เฉพาะเมื่อมีแรงทุบแคลคูลัสคมชัด
-    4. ขยายเวลาสแกนเป็น 08:30 - 22:30 น. และใช้สมองซีกขวาช่วยเติมไม้ในวันที่ยังไม่ได้เทรดหลัง 15:00 น.
+    สมองส่วนกลาง V15.2 (Dynamic Tenkan-Kijun Equilibrium Value Zone):
+    - ใช้เส้น Dynamic Tenkan-sen และ Kijun-sen เป็นแนวรับ-แนวต้านไดนามิกช่วงรันเทรนด์
+    - ป้องกันการไล่ราคาปลายคลื่นด้วย Kijun Disparity (|kijun_disp| <= 1.65 ATR)
+    - แทนที่ SWEET-KAMA SELL (ที่เคยขาดทุนในไฟล์ 42) ด้วยท่า SWEET-TK (ย่อทดสอบโซนสมดุล Tenkan/Kijun แล้วดีดกลับตามเทรนด์)
     """
     t_mins = int(bar["thai_mins"])
     if not ((8 * 60 + 30) <= t_mins <= (22 * 60 + 30)):
@@ -16,11 +15,17 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
     open_p = float(bar["open"])
     vwap_p = float(bar["vwap"])
     kama_p = float(bar.get("kama", vwap_p))
+    tenkan_p = float(bar.get("tenkan", close_p))
+    kijun_p = float(bar.get("kijun", close_p))
+    kijun_disp = float(bar.get("kijun_disp", 0.0))
+
+    prev_tenkan = float(prev.get("tenkan", prev["close"]))
+    prev_kijun = float(prev.get("kijun", prev["close"]))
+
     atr_v = float(bar["atr"])
     vwrsi_v = float(bar["vwrsi"])
     prev_rsi = float(prev["vwrsi"])
     fast_z = float(bar.get("fast_z", 0.0))
-    prev_z = float(prev.get("fast_z", 0.0))
     p_accel = float(bar.get("price_accel", 0.0))
 
     h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
@@ -34,7 +39,7 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
         return None, ""
 
     # =========================================================================
-    # 1. โหมดรสหวาน (SWEET): ประสานสมองซีกซ้าย + ซีกขวา (ตัด SWEET-KAMA SELL ทิ้ง!)
+    # 1. โหมดรสหวาน (SWEET): ผสาน VWAP Pullback + Dynamic Tenkan/Kijun Equilibrium Zone
     # =========================================================================
     if flavor == "SWEET":
         chop_v = float(info.get("chop", 50.0))
@@ -42,6 +47,8 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
         atr_r = float(info.get("atr_ratio", 1.0))
         has_oi = bool(info.get("has_macro_expansion", False))
         need_daily = bool(info.get("need_daily_trade", False))
+        tk_bull = bool(info.get("tk_bull", False))
+        tk_bear = bool(info.get("tk_bear", False))
 
         # [ซีกซ้าย - Left Hemisphere]: เกณฑ์ Sniper เข้มงวด
         if chop_v < 50.0:
@@ -56,16 +63,7 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
                 if (32 <= vwrsi_v <= 48) and (vwrsi_v < prev_rsi) and (fast_z >= -1.05):
                     return "SELL", "SWEET-VWAP"
 
-            # SWEET-KAMA อนุญาตเฉพาะฝั่ง BUY เท่านั้น! (ตัดฝั่ง SELL ที่แพ้ 8/9 ไม้ -$2,487 ทิ้งเด็ดขาด)
-            prev_red = float(prev["close"]) < float(prev["open"])
-            prev_kama = float(prev.get("kama", prev["vwap"]))
-            touched_kama_bull = float(prev["low"]) <= (prev_kama + 0.15 * atr_v)
-
-            if info["bull_trend"] and left_bull_exp and prev_red and touched_kama_bull and (close_p > open_p) and (close_p > kama_p) and (close_p > vwap_p):
-                if (p_accel >= 0.05) and (50 <= vwrsi_v <= 65) and (fast_z <= 0.85):
-                    return "BUY", "SWEET-KAMA"
-
-        # [ซีกขวา - Right Hemisphere]: Contextual Flow & Daily Quota Filler
+        # [ซีกขวา - Right Hemisphere]: Contextual Flow + Dynamic Tenkan/Kijun Value Zone
         right_bull_flow = (k_slope > 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.72) or (need_daily and atr_r >= 0.65))
         right_bear_flow = (k_slope < 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.72) or (need_daily and atr_r >= 0.65))
 
@@ -77,21 +75,32 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
             if (32 <= vwrsi_v <= 50) and (vwrsi_v < prev_rsi) and (p_accel < 0.0) and (fast_z >= -1.00):
                 return "SELL", "SWEET-VWAP"
 
-        # ซีกขวาขาขึ้น: SWEET-KAMA BUY (เฉพาะฝั่ง BUY)
+        # ---------------------------------------------------------------------
+        # [ท่าใหม่ Dynamic Ichimoku TK Pullback]:
+        # ราคาย่อตัวลงมาทดสอบแนวรับ-แนวต้าน Dynamic Tenkan-sen / Kijun-sen (TK Value Pocket)
+        # แต่ไม่หลุดโครงสร้าง Kijun และไม่ฉีกตัวไกลเกิน Kijun Disparity (|kijun_disp| <= 1.60)
+        # ---------------------------------------------------------------------
         prev_red = float(prev["close"]) < float(prev["open"])
         prev_green = float(prev["close"]) > float(prev["open"])
-        if info["bull_trend"] and right_bull_flow and prev_red and (prev_z <= 0.35) and (close_p > open_p) and (close_p > vwap_p) and (close_p > kama_p):
-            if (p_accel >= 0.06) and (vwrsi_v > prev_rsi) and (52 <= vwrsi_v <= 66) and (fast_z <= 0.90):
-                return "BUY", "SWEET-KAMA"
 
-        # ซีกขวาขาลง: คืนชีพ SWEET-EV SELL จากไฟล์ 39/37 (ที่ชนะ 69.2% ในวันที่ไฟล์ 42 เงียบ!)
-        # เข้าเมื่อแท่งก่อนหน้าดีดเขียวพักตัว แต่ปิดใต้ VWAP/KAMA แล้วแท่งนี้เกิดแรงทุบแคลคูลัสส่งลงต่อ
-        if info["bear_trend"] and right_bear_flow and prev_green and (close_p < open_p) and (close_p < vwap_p) and (close_p < kama_p):
-            if (p_accel <= -0.08) and (vwrsi_v < prev_rsi) and (34 <= vwrsi_v <= 48) and (fast_z >= -0.95):
-                return "SELL", "SWEET-EV"
+        # ขาขึ้น: Tenkan >= Kijun, แท่งก่อนหน้าย่อลงมาแตะโซนแนวรับ Tenkan (แต่ไม่หลุด Kijun เกิน 0.2 ATR)
+        # แล้วแท่งปัจจุบันดีดกลับปิดเขียวเหนือทั้ง Tenkan, KAMA และ VWAP พร้อมความเร่ง p_accel > 0
+        pulled_to_tk_bull = (float(prev["low"]) <= prev_tenkan + 0.10 * atr_v) and (float(prev["close"]) >= prev_kijun - 0.15 * atr_v)
+        if info["bull_trend"] and tk_bull and right_bull_flow and prev_red and pulled_to_tk_bull:
+            if (close_p > open_p) and (close_p > tenkan_p) and (close_p > vwap_p) and (0.0 < kijun_disp <= 1.60):
+                if (p_accel >= 0.05) and (vwrsi_v > prev_rsi) and (50 <= vwrsi_v <= 66) and (fast_z <= 0.90):
+                    return "BUY", "SWEET-KAMA"
+
+        # ขาลง: Tenkan <= Kijun, แท่งก่อนหน้าดีดขึ้นไปทดสอบแนวต้าน Tenkan (แต่ไม่ทะลุ Kijun เกิน 0.2 ATR)
+        # แล้วแท่งปัจจุบันโดนตบกลับปิดแดงใต้ทั้ง Tenkan, KAMA และ VWAP พร้อมความเร่งทุบลง p_accel <= -0.07
+        pulled_to_tk_bear = (float(prev["high"]) >= prev_tenkan - 0.10 * atr_v) and (float(prev["close"]) <= prev_kijun + 0.15 * atr_v)
+        if info["bear_trend"] and tk_bear and right_bear_flow and prev_green and pulled_to_tk_bear:
+            if (close_p < open_p) and (close_p < tenkan_p) and (close_p < vwap_p) and (-1.60 <= kijun_disp < 0.0):
+                if (p_accel <= -0.07) and (vwrsi_v < prev_rsi) and (34 <= vwrsi_v <= 50) and (fast_z >= -0.90):
+                    return "SELL", "SWEET-KAMA"
 
     # =========================================================================
-    # 2. โหมดรสเปรี้ยว (SOUR): แชมป์ทำกำไร +$3,809.24 (WR 67.74%) ในไฟล์ 42
+    # 2. โหมดรสเปรี้ยว (SOUR): แชมป์ทำกำไร +$3,809.24 ในไฟล์ 42
     # =========================================================================
     if flavor == "SOUR":
         hemi = info.get("hemisphere", "L")
@@ -117,7 +126,6 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
             if h4_bear and (info["prev_z"] >= 1.55) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 55):
                 return "SELL", "SALTY-MR"
         else:
-            # ซีกขวา (Daily Filler หลัง 15:00 น. เมื่อวันนี้ยังไม่มีไม้): ต้องมีความเร่ง p_accel ยืนยันการเด้งกลับ
             if (h1_bull and h4_bull) and (info["prev_z"] <= -1.28) and (p_accel >= 0.04) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 46):
                 return "BUY", "SALTY-MR"
             if (h1_bear and h4_bear) and (info["prev_z"] >= 1.28) and (p_accel <= -0.04) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 54):

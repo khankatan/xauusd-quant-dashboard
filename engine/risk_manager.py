@@ -94,7 +94,7 @@ class RiskGuard:
             base = THROTTLED_RISK_PCT
         else:
             if is_macro_conv and (utc_hour in [8, 9, 10, 13, 14]):
-                base = 0.60  # Prime Conviction Booster (+OI ในช่วง Prime London/NY Overlap)
+                base = 0.52  # Prime Conviction Booster (+OI ในช่วง Prime London/NY Overlap)
             else:
                 base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
 

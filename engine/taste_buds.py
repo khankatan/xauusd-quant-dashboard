@@ -1,10 +1,11 @@
 def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
     """
-    สวิตช์คัดกรองสภาวะตลาด V13 (Adaptive CHOP Regime Switch):
-    - BITTER: ตลาดผันผวนกระชากผิดปกติ (atr_ratio > 1.85) หรือตลาดนิ่งสนิท (< 0.45)
-    - SOUR (Trap): กวาดขอบ Asian High/Low ในช่วงบ่ายลอนดอน (14:00-17:45 น.) ที่ทำกำไร +$1,762 ในไฟล์ 32
-    - SALTY (Sideways MR): เมื่อ Adaptive CHOP >= 54.0 (ตลาดบีบตัวไซด์เวย์) และราคาฉีกเกิน |prev_z| >= 1.60 (สูตรทำเงินของไฟล์ 29)
-    - SWEET (Trend VWAP/EV): เมื่อตลาดไม่ไซด์เวย์หนัก (CHOP < 54.0) และ H1+H4 เรียงตัวไปทางเดียวกัน (สูตรทำเงินของไฟล์ 25/26)
+    สวิตช์คัดกรองสภาวะตลาด V13.1 (Hybrid File 33 + File 34 Calibration):
+    1. BITTER: ตลาดผันผวนกระชากผิดปกติ (atr_ratio > 1.85) หรือตลาดนิ่งสนิท (< 0.45)
+    2. SOUR (Trap): กวาดขอบ Asian High/Low ในช่วงบ่ายลอนดอน (14:00-17:45 น.)
+    3. SALTY (Sideways MR): สมองทำเงินหลัก (WR 64.3% ในทั้งไฟล์ 33 และ 34)
+       ทำงานเมื่อ CHOP >= 46.0 (รวมโซนก้ำกึ่งที่เคยทำให้ SWEET-VWAP แพ้) และราคาฉีกเกิน |prev_z| >= 1.50
+    4. SWEET (Trend VWAP/EV): ทำงานเมื่อ H1+H4 เรียงตัวสอดคล้องกัน และ CHOP < 54.0
     """
     t_mins = int(bar["thai_mins"])
     atr_ratio = float(bar.get("atr_ratio", 1.0))
@@ -21,7 +22,7 @@ def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
     if atr_ratio > 1.85 or atr_ratio < 0.45:
         return "BITTER", {"reason": "TOXIC_VOLATILITY"}
 
-    # 2. รสเปรี้ยว (SOUR): กับดักกวาดสภาพคล่อง Asian Box ช่วงบ่าย-เย็น (14:00 - 17:45 น.)
+    # 2. รสเปรี้ยว (SOUR): กับดักกวาดสภาพคล่อง Asian Box ช่วงบ่ายลอนดอน (14:00 - 17:45 น.)
     has_asian_box = (asian_bars >= 8) and (asian_high > asian_low) and ((14 * 60) <= t_mins <= (17 * 60 + 45))
     if has_asian_box and (atr_ratio <= 1.30):
         swept_low = ((float(bar["low"]) < asian_low) or (float(prev["low"]) < asian_low)) and (float(bar["close"]) > asian_low)
@@ -32,17 +33,18 @@ def taste_market_flavor(bar, prev, asian_high, asian_low, asian_bars):
                 "swept_high": swept_high
             }
 
-    # 3. รสเค็ม (SALTY): เมื่อตลาดเป็นไซด์เวย์ (CHOP >= 54.0) และราคาฉีกออกนอกกรอบ |prev_z| >= 1.60
-    if (chop_v >= 54.0) and (abs(prev_z) >= 1.60):
+    # 3. รสเค็ม (SALTY): ชนะถึง 64.3%-64.7% ทั้งในไฟล์ 33 และ 34 -> ขยายมารับโซน CHOP >= 46.0 เมื่อราคาฉีกตัว
+    if (chop_v >= 46.0) and (abs(prev_z) >= 1.50):
         return "SALTY", {
             "prev_z": prev_z
         }
 
-    # 4. รสหวาน (SWEET): เมื่อตลาดเป็นเทรนด์ (CHOP < 54.0) และ H1+H4 เรียงตัวสอดคล้องกัน
+    # 4. รสหวาน (SWEET): เทรนด์ H1+H4 เรียงตัวสอดคล้องกัน
     if (chop_v < 54.0) and mtf_aligned:
         return "SWEET", {
             "bull_trend": (h1_bull and h4_bull),
-            "bear_trend": (h1_bear and h4_bear)
+            "bear_trend": (h1_bear and h4_bear),
+            "chop": chop_v
         }
 
     return "BITTER", {"reason": "NO_DISTINCT_FLAVOR"}

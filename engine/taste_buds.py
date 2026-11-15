@@ -1,10 +1,7 @@
 def taste_market_flavor(bar, prev, asian_high=None, asian_low=None, asian_bars=0):
     """
-    สวิตช์คัดกรองสภาวะตลาด V14.2 (Tuned Mathematical Thresholds):
-    - BITTER: atr_ratio > 1.80 หรือ < 0.50 (ตัดช่วงตลาดซึมจัดและข่าวกระชากแรง)
-    - SOUR: กวาดขอบโครงสร้าง + ความเร่งสวนกลับชัดเจน (|p_accel| >= 0.08)
-    - SALTY: CHOP >= 50.0 และ |prev_z| >= 1.55 (เฉพาะวันที่ไม่มี +OI ดันเทรนด์)
-    - SWEET: CHOP < 50.0 และ H1+H4 เรียงตัวสอดคล้องกัน
+    สวิตช์คัดกรองสภาวะตลาด V14.4:
+    คลายเกณฑ์ SOUR (WR 64.7%) และ SALTY (WR 58.8%) เล็กน้อยเพื่อเพิ่มจำนวนวันออกไม้ให้สม่ำเสมอขึ้น
     """
     atr_ratio = float(bar.get("atr_ratio", 1.0))
     chop_v = float(bar.get("chop", 50.0))
@@ -26,25 +23,26 @@ def taste_market_flavor(bar, prev, asian_high=None, asian_low=None, asian_bars=0
 
     has_macro_expansion = bool(bar.get("macro_bull_conv", False)) or bool(bar.get("macro_bear_conv", False))
 
-    # 1. รสขม (BITTER): จูนกรอบความผันผวนเป็น 0.50 - 1.80
-    if atr_ratio > 1.80 or atr_ratio < 0.50:
+    # 1. รสขม (BITTER): กรอบความผันผวนปลอดภัย 0.48 - 1.82
+    if atr_ratio > 1.82 or atr_ratio < 0.48:
         return "BITTER", {"reason": "TOXIC_VOLATILITY"}
 
-    # 2. รสเปรี้ยว (SOUR): กวาดขอบโครงสร้างวัฏจักร + ความเร่งดีดกลับแรงพอ (|p_accel| >= 0.08)
+    # 2. รสเปรี้ยว (SOUR): พระเอกทำกำไรอันดับ 1 ในไฟล์ 39 (+$2,026.87 / WR 64.71%)
     ref_high = max(float(asian_high), struct_h) if (asian_bars >= 8 and asian_high > asian_low) else struct_h
     ref_low = min(float(asian_low), struct_l) if (asian_bars >= 8 and asian_high > asian_low) else struct_l
 
-    if (ref_high > ref_low) and (atr_ratio <= 1.25):
-        swept_low = ((low_p < ref_low) or (float(prev["low"]) < ref_low)) and (close_p > ref_low) and (p_accel >= 0.08)
-        swept_high = ((high_p > ref_high) or (float(prev["high"]) > ref_high)) and (close_p < ref_high) and (p_accel <= -0.08)
+    if (ref_high > ref_low) and (atr_ratio <= 1.28):
+        swept_low = ((low_p < ref_low) or (float(prev["low"]) < ref_low)) and (close_p > ref_low) and (p_accel >= 0.03)
+        swept_high = ((high_p > ref_high) or (float(prev["high"]) > ref_high)) and (close_p < ref_high) and (p_accel <= -0.03)
         if swept_low or swept_high:
             return "SOUR", {
                 "swept_low": swept_low,
                 "swept_high": swept_high
             }
 
-    # 3. รสเค็ม (SALTY): ตลาดไซด์เวย์ CHOP >= 50.0 และ |prev_z| >= 1.55 (ชนะ 52.0% +$355.76 ในไฟล์ 37)
-    if (not has_macro_expansion) and (chop_v >= 50.0) and (abs(prev_z) >= 1.55):
+    # 3. รสเค็ม (SALTY): พระเอกทำกำไรอันดับ 2 ในไฟล์ 39 (+$1,092.75 / WR 58.82%)
+    # ขยายให้รับตั้งแต่ CHOP >= 48.5 และ |prev_z| >= 1.42 เพื่อเก็บไม้ในวันที่ตลาดแกว่งแคบได้มากขึ้น
+    if (not has_macro_expansion) and (chop_v >= 48.5) and (abs(prev_z) >= 1.42):
         return "SALTY", {
             "prev_z": prev_z
         }

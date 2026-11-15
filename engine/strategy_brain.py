@@ -2,10 +2,9 @@ from engine.taste_buds import taste_market_flavor
 
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=0):
     """
-    สมองซีกซ้าย (Left-Brain Sniper Core - V16 Isolated Dual-Brain):
-    - SOUR-TRAP & SWEET-VWAP: คงความแม่นยำสูงสุดระดับไฟล์ 47
-    - Crisis Volatility Guard (ATR > 11.5): ปิด SALTY-MR ช่วงวิกฤต และบังคับ SOUR-TRAP ต้องมี +OI ยืนยัน
-    - SALTY-MR Time Filter: บล็อกชั่วโมงหลุมดำ 06:00 & 11:00 UTC (13:00 & 18:00 น. ไทย)
+    สมองซีกซ้าย (Left-Brain Sniper Core - V20 Regime-Adaptive):
+    - Volatility Squeeze Filter: เช็ค atr_ratio บีบตัวก่อนระเบิดเทรนด์
+    - Strict Trend-Following: ห้ามดักสวน (SALTY/SOUR) หากตลาดเป็นเทรนด์ (CHOP < 45.0) ให้รอรีบาวด์เข้าตามน้ำ
     """
     t_mins = int(bar["thai_mins"])
     utc_hour = int(bar["thai_hour"]) - 7
@@ -24,7 +23,7 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
     prev_kijun = float(prev.get("kijun", prev["close"]))
 
     vwrsi_v = float(bar["vwrsi"])
-    prev_rsi = float(prev["vwrsi"])
+    prev_rsi = float(bar["vwrsi"])
     fast_z = float(bar.get("fast_z", 0.0))
     p_accel = float(bar.get("price_accel", 0.0))
     atr_val = float(bar["atr"])
@@ -42,17 +41,17 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
     has_oi = bool(info.get("has_macro_expansion", False))
     is_dead_zone_utc = (5 <= utc_hour <= 7) or (utc_hour == 12)
     is_crisis_vol = (atr_val > 11.5)
+    chop_v = float(info.get("chop", 50.0))
+    atr_r = float(info.get("atr_ratio", 1.0))
 
     # =========================================================================
-    # 1. โหมดรสหวาน (SWEET)
+    # 1. โหมดรสหวาน (SWEET - Trend Pullback Rider): ขี่เทรนด์ตามน้ำเมื่อมีการย่อตัว
     # =========================================================================
     if flavor == "SWEET":
         if is_dead_zone_utc and not has_oi:
             return None, ""
 
-        chop_v = float(info.get("chop", 50.0))
         k_slope = float(info.get("kama_slope", 0.0))
-        atr_r = float(info.get("atr_ratio", 1.0))
         tk_bull = bool(info.get("tk_bull", False))
         tk_bear = bool(info.get("tk_bear", False))
 
@@ -63,8 +62,8 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
         pulled_bear_tk = (t_mins <= 20 * 60 + 30) and tk_bear and (float(prev["high"]) >= prev_kijun) and (close_p < kijun_p) and (close_p < tenkan_p) and (close_p < vwap_p)
 
         if chop_v < 50.0:
-            left_bull_exp = ((chop_v < 38.2) and (k_slope > 0.01)) or ((atr_r >= 0.90) and (k_slope >= 0.03))
-            left_bear_exp = ((chop_v < 38.2) and (k_slope < -0.01)) or ((atr_r >= 0.90) and (k_slope <= -0.03))
+            left_bull_exp = ((chop_v < 38.2) and (k_slope > 0.01)) or ((atr_r >= 0.85) and (k_slope >= 0.03))
+            left_bear_exp = ((chop_v < 38.2) and (k_slope < -0.01)) or ((atr_r >= 0.85) and (k_slope <= -0.03))
 
             if info["bull_trend"] and left_bull_exp and (close_p > open_p) and (52 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (fast_z <= 1.05):
                 if pulled_bull_vwap:
@@ -78,8 +77,8 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
                 if pulled_bear_tk:
                     return "SELL", "SWEET-TK"
 
-        right_bull_flow = (k_slope > 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.72))
-        right_bear_flow = (k_slope < 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.72))
+        right_bull_flow = (k_slope > 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.70))
+        right_bear_flow = (k_slope < 0.0) and (has_oi or (chop_v < 46.5 and atr_r >= 0.70))
 
         if info["bull_trend"] and right_bull_flow and (close_p > kama_p) and (close_p > open_p):
             if (50 <= vwrsi_v <= 68) and (vwrsi_v > prev_rsi) and (p_accel > 0.0) and (fast_z <= 1.00):
@@ -96,7 +95,13 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
                     return "SELL", "SWEET-TK"
 
     # =========================================================================
-    # 2. โหมดรสเปรี้ยว (SOUR): คงความคมระดับไฟล์ 47 + บังคับ +OI ช่วงตลาดวิกฤต
+    # 2. Strict Trend Guard: หากตลาดเป็นเทรนด์จัด (CHOP < 45.0) ห้ามเปิดโมดูล SOUR หรือ SALTY (ดักสวน) เด็ดขาด!
+    # =========================================================================
+    if chop_v < 45.0:
+        return None, ""
+
+    # =========================================================================
+    # 3. โหมดรสเปรี้ยว (SOUR): ทำงานเฉพาะช่วงตลาดไซด์เวย์/พักตัว
     # =========================================================================
     if flavor == "SOUR":
         if (not is_crisis_vol) or has_oi:
@@ -113,7 +118,7 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
                     return "SELL", "SOUR-TRAP"
 
     # =========================================================================
-    # 3. โหมดรสเค็ม (SALTY): ปิดช่วงวิกฤต (ATR > 11.5) + ปิดชั่วโมงหลุมดำ 06:00 & 11:00 UTC
+    # 4. โหมดรสเค็ม (SALTY): ทำงานเฉพาะช่วงตลาดไซด์เวย์ (CHOP >= 45.0)
     # =========================================================================
     if flavor == "SALTY":
         if (not is_crisis_vol) and (utc_hour not in [6, 11]):

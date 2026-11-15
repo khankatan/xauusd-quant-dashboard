@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XAUUSD CFD Multi-Brain Quant Terminal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #060913;
+      --card-bg: rgba(15, 23, 42, 0.65);
+      --border-glow: rgba(56, 189, 248, 0.22);
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg-deep);
+      background-image:
+        radial-gradient(circle at 12% 15%, rgba(16, 185, 129, 0.12), transparent 35%),
+        radial-gradient(circle at 88% 10%, rgba(56, 189, 248, 0.14), transparent 38%),
+        radial-gradient(circle at 50% 90%, rgba(245, 158, 11, 0.08), transparent 45%);
+      color: #f8fafc;
+      min-height: 100vh;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .glass-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.28s ease, box-shadow 0.28s ease;
+    }
+    .glass-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--border-glow);
+      box-shadow: 0 25px 50px -12px rgba(14, 165, 233, 0.18), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+    }
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(1.25); }
+    }
+    .live-dot {
+      animation: pulseGlow 2s infinite ease-in-out;
+    }
+    .progress-bar-fill {
+      transition: width 1.1s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+  </style>
+</head>
+<body class="p-4 md:p-7">
+  <div class="max-w-7xl mx-auto space-y-6">
+
+    <!-- Top Header Bar -->
+    <header class="glass-card rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-400 via-yellow-500 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/20 text-slate-950 font-extrabold text-xl">
+          Au
+        </div>
+        <div>
+          <div class="flex items-center gap-2.5">
+            <h1 class="text-xl md:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-100 to-sky-300 bg-clip-text text-transparent">
+              XAUUSD CFD MULTI-BRAIN QUANT TERMINAL
+            </h1>
+            <span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span> LIVE ENGINE
+            </span>
+          </div>
+          <p id="sub-info" class="text-xs text-slate-400 mt-1 mono">กำลังซิงค์ข้อมูลจาก GitHub Quant Engine...</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <div id="regime-pill" class="px-3.5 py-2 rounded-xl bg-slate-900/90 border border-sky-500/30 text-xs font-bold text-sky-300 mono">
+          REGIME: LOADING...
+        </div>
+        <div class="px-4 py-2 rounded-xl bg-slate-900/90 border border-amber-500/30 text-right">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400">XAU/USD CFD SPOT</div>
+          <div id="spot-price" class="text-lg font-extrabold text-amber-400 mono">$0.00</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Row 1: Core KPI & FTMO Drawdown Guardrails -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+
+      <!-- Card 1: Net Profit & Daily Return -->
+      <div class="glass-card rounded-2xl p-5 relative overflow-hidden">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Profit (ฐานทุน $100,000)</div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div id="net-pnl" class="text-2xl md:text-3xl font-extrabold mono text-emerald-400">+$0.00</div>
+          <span id="net-pnl-pct" class="text-xs font-bold px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 mono">+0.00%</span>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-800/80 flex justify-between text-xs text-slate-400">
+          <span>เฉลี่ยวันจันทร์–ศุกร์:</span>
+          <span id="avg-daily" class="font-bold text-slate-200 mono">+0.000% / วัน</span>
+        </div>
+      </div>
+
+      <!-- Card 2: Max Daily Drawdown (Limit < 3.00%) -->
+      <div class="glass-card rounded-2xl p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Max Daily DD (ห้ามเกิน 3%)</span>
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 mono">LIMIT 3.00%</span>
+        </div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div id="max-daily-dd" class="text-2xl md:text-3xl font-extrabold mono text-sky-400">0.00%</div>
+          <span id="max-daily-cash" class="text-xs text-slate-400 mono">-$0.00</span>
+        </div>
+        <div class="w-full h-2 bg-slate-800 rounded-full mt-3 overflow-hidden">
+          <div id="daily-dd-bar" class="h-full bg-gradient-to-r from-emerald-400 via-sky-400 to-amber-400 progress-bar-fill" style="width: 10%"></div>
+        </div>
+        <div class="mt-2 flex justify-between text-[11px] text-slate-400">
+          <span>วันที่ขาดทุนสูงสุด:</span>
+          <span id="worst-dd-date" class="font-bold text-amber-300 mono">-</span>
+        </div>
+      </div>
+
+      <!-- Card 3: Max Overall Drawdown from $100,000 (Limit < 10.00%) -->
+      <div class="glass-card rounded-2xl p-5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Max Drawdown (ฐาน $100k)</span>
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 mono">ห้ามต่ำกว่า $90k</span>
+        </div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div id="max-overall-dd" class="text-2xl md:text-3xl font-extrabold mono text-purple-400">0.00%</div>
+          <span id="lowest-eq" class="text-xs text-slate-400 mono">ต่ำสุด $100,000</span>
+        </div>
+        <div class="w-full h-2 bg-slate-800 rounded-full mt-3 overflow-hidden">
+          <div id="overall-dd-bar" class="h-full bg-gradient-to-r from-emerald-400 to-purple-500 progress-bar-fill" style="width: 10%"></div>
+        </div>
+        <div class="mt-2 flex justify-between text-[11px] text-slate-400">
+          <span>ระยะห่างจากจุดตัด $90,000:</span>
+          <span id="buffer-to-90k" class="font-bold text-emerald-300 mono">+$10,000</span>
+        </div>
+      </div>
+
+      <!-- Card 4: Win Rate & Profit Factor -->
+      <div class="glass-card rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Efficiency & Execution</div>
+        <div class="mt-2 flex items-baseline justify-between">
+          <div id="profit-factor" class="text-2xl md:text-3xl font-extrabold mono text-amber-400">PF 0.00</div>
+          <span id="win-rate" class="text-xs font-bold px-2 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 mono">WR 0.0%</span>
+        </div>
+        <div class="mt-3 pt-3 border-t border-slate-800/80 flex justify-between text-xs text-slate-400">
+          <span>จำนวนไม้ / วันทำการ:</span>
+          <span id="trade-coverage" class="font-bold text-slate-200 mono">0 / 0 วัน</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Row 2: Sub-Brain Performance Cards (ผลงานแยกตามสมองย่อย) -->
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-sky-400"></span> ผลงานแยกตามสมองย่อย & ตัวกรองมหภาค (Multi-Brain Attribution)
+        </h2>
+        <span class="text-xs text-slate-400">CFD Risk: 0.35% ปกติ | 0.50% เมื่อ OI+DXY ยืนยัน | 0.25% ช่วงลดความเสี่ยง</span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="agent-cards">
+        <!-- Populated dynamically by JS -->
+      </div>
+    </div>
+
+    <!-- Row 3: Live Signal + Equity Curve -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Live Signal Execution Panel -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-extrabold uppercase tracking-wider text-slate-400">LIVE CFD SIGNAL</span>
+            <span id="sig-agent" class="text-xs font-bold px-2.5 py-0.5 rounded-md bg-slate-800 text-sky-300 mono">SCANNING</span>
+          </div>
+          <div id="sig-badge" class="mt-4 py-4 rounded-xl text-center font-extrabold text-2xl tracking-wider bg-slate-900/90 border border-slate-700 text-slate-300 mono">
+            WAIT / SCANNING
+          </div>
+          <div class="mt-4 space-y-2.5 text-xs mono">
+            <div class="flex justify-between p-2.5 rounded-lg bg-slate-900/70">
+              <span class="text-slate-400">ENTRY PRICE</span>
+              <span id="sig-entry" class="font-bold text-white">-</span>
+            </div>
+            <div class="flex justify-between p-2.5 rounded-lg bg-slate-900/70">
+              <span class="text-slate-400">STOP LOSS (2.2 ATR)</span>
+              <span id="sig-sl" class="font-bold text-rose-400">-</span>
+            </div>
+            <div class="flex justify-between p-2.5 rounded-lg bg-slate-900/70">
+              <span class="text-slate-400">TAKE PROFIT (3.5 ATR)</span>
+              <span id="sig-tp" class="font-bold text-emerald-400">-</span>
+            </div>
+            <div class="flex justify-between p-2.5 rounded-lg bg-slate-900/70">
+              <span class="text-slate-400">BREAKEVEN+ (1.35R)</span>
+              <span id="sig-be" class="font-bold text-amber-300">-</span>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs mono">
+          <span class="text-slate-400">RECOMMENDED LOT:</span>
+          <span id="sig-lot" class="text-sm font-extrabold text-sky-400">0.00 Lots (0.35%)</span>
+        </div>
+      </div>
+
+      <!-- Equity Curve Chart -->
+      <div class="glass-card rounded-2xl p-5 lg:col-span-2">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-extrabold uppercase tracking-wider text-slate-300">พอร์ตจำลอง FTMO $100,000 (Equity Growth Curve)</h3>
+          <div class="flex gap-3 text-xs mono">
+            <span id="buy-pnl-tag" class="text-emerald-400 font-bold">BUY: +$0</span>
+            <span id="sell-pnl-tag" class="text-rose-400 font-bold">SELL: +$0</span>
+          </div>
+        </div>
+        <div id="equity-chart" class="w-full h-64"></div>
+      </div>
+    </div>
+
+    <!-- Row 4: XAUUSD M15 Chart & Recent Executions Table -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div class="glass-card rounded-2xl p-5 lg:col-span-6">
+        <h3 class="text-sm font-extrabold uppercase tracking-wider text-slate-300 mb-3">XAU/USD M15 Institutional Price Action</h3>
+        <div id="candle-chart" class="w-full h-80"></div>
+      </div>
+
+      <div class="glass-card rounded-2xl p-5 lg:col-span-6 overflow-hidden flex flex-col">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-extrabold uppercase tracking-wider text-slate-300">ประวัติการออกไม้ล่าสุด (Recent CFD Trades)</h3>
+          <a href="data/all_trades.csv" download class="text-xs font-bold px-3 py-1 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 transition">
+            ดาวน์โหลด CSV
+          </a>
+        </div>
+        <div class="overflow-x-auto flex-1">
+          <table class="w-full text-left border-collapse text-xs mono">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2 px-2">เวลาเข้า (UTC)</th>
+                <th class="py-2 px-2">คำสั่ง</th>
+                <th class="py-2 px-2">เข้า / ออก</th>
+                <th class="py-2 px-2">สมอง / สถานะ</th>
+                <th class="py-2 px-2 text-right">กำไร/ขาดทุน</th>
+              </tr>
+            </thead>
+            <tbody id="trades-tbody" class="divide-y divide-slate-800/60"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const fmtMoney = (v) => (v >= 0 ? `+$${v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}` : `-$${Math.abs(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`);
+
+    async function loadDashboard() {
+      try {
+        const res = await fetch(`data/state.json?t=${Date.now()}`);
+        const data = await res.json();
+        const bt = data.backtest;
+
+        document.getElementById('sub-info').textContent = `${data.data_source} | ${data.history_range} | อัปเดต: ${data.updated_utc}`;
+        document.getElementById('regime-pill').textContent = data.regime;
+        document.getElementById('spot-price').textContent = `$${data.current_price.toLocaleString('en-US', {minimumFractionDigits:2})}`;
+
+        // KPI 1: Net Profit
+        const pnlEl = document.getElementById('net-pnl');
+        pnlEl.textContent = fmtMoney(bt.net_pnl);
+        pnlEl.className = `text-2xl md:text-3xl font-extrabold mono ${bt.net_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+        document.getElementById('net-pnl-pct').textContent = `${bt.net_pnl_pct >= 0 ? '+' : ''}${bt.net_pnl_pct}%`;
+        document.getElementById('avg-daily').textContent = `${bt.avg_daily_pct >= 0 ? '+' : ''}${bt.avg_daily_pct}% / วัน`;
+
+        // KPI 2: Max Daily DD (Limit 3%)
+        const dailyDD = bt.max_daily_dd_pct || 0;
+        document.getElementById('max-daily-dd').textContent = `${dailyDD.toFixed(2)}%`;
+        document.getElementById('max-daily-cash').textContent = `-$${(bt.max_daily_dd_cash || 0).toFixed(2)}`;
+        document.getElementById('worst-dd-date').textContent = bt.worst_dd_date || '-';
+        document.getElementById('daily-dd-bar').style.width = `${Math.min(100, (dailyDD / 3.0) * 100)}%`;
+
+        // KPI 3: Max Overall DD from $100,000 (Limit 10% / $90,000)
+        const ovDD = bt.max_overall_dd_pct || 0;
+        const lowEq = data.lowest_equity || 100000;
+        document.getElementById('max-overall-dd').textContent = `${ovDD.toFixed(2)}%`;
+        document.getElementById('lowest-eq').textContent = `ต่ำสุด $${lowEq.toLocaleString('en-US', {minimumFractionDigits:0})}`;
+        document.getElementById('overall-dd-bar').style.width = `${Math.min(100, (ovDD / 10.0) * 100)}%`;
+        document.getElementById('buffer-to-90k').textContent = `+$${(lowEq - 90000).toLocaleString('en-US', {minimumFractionDigits:0})}`;
+
+        // KPI 4: PF & Coverage
+        document.getElementById('profit-factor').textContent = `PF ${bt.profit_factor.toFixed(2)}`;
+        document.getElementById('win-rate').textContent = `WR ${bt.win_rate.toFixed(1)}%`;
+        document.getElementById('trade-coverage').textContent = `${bt.total_trades} / ${bt.total_bdays || 36} วัน`;
+
+        // Sub-Brain Cards (ข้อความอัปเดตตรงกับโค้ด V7.3 ล่าสุด)
+        const ag = bt.agents || {};
+        const brains = [
+          { key: 'VWAP_PB', title: 'สมอง 1: VWAP Pullback', desc: 'ย่อทดสอบเส้น Session VWAP ตามเทรนด์ H1', accent: 'sky' },
+          { key: 'EV_PB', title: 'สมอง 2: Evening Pulse', desc: 'จับแรงส่งช่วงค่ำ (18:15–21:30 น.) + OI', accent: 'emerald' },
+          { key: 'OI_BOOSTED', title: 'พลังเสริม: COMEX OI + DXY', desc: 'อัด Risk 0.50% (VWAP-PB & EV-PB) เมื่อ OI ยืนยัน', accent: 'amber' },
+          { key: 'ROLLOVER', title: 'เกราะปิด 03:00 น. & ศุกร์', desc: 'ปิดก่อน Rollover 03:00 น. และคืนศุกร์ก่อนตลาดปิด', accent: 'purple' }
+        ];
+
+        const agentContainer = document.getElementById('agent-cards');
+        agentContainer.innerHTML = brains.map(b => {
+          const st = ag[b.key] || { trades: 0, win_rate: 0, net_pnl: 0, pf: 0 };
+          const isPos = st.net_pnl >= 0;
+          return `
+            <div class="glass-card rounded-2xl p-4">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-extrabold text-${b.accent}-400">${b.title}</span>
+                <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 mono">${st.trades} ไม้</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1">${b.desc}</p>
+              <div class="mt-3 flex items-baseline justify-between">
+                <span class="text-lg font-extrabold mono ${isPos ? 'text-emerald-400' : 'text-rose-400'}">${fmtMoney(st.net_pnl)}</span>
+                <span class="text-xs text-slate-300 mono">WR ${st.win_rate}% | PF ${st.pf}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        // Signal Card (BUY / SELL สำหรับ CFD)
+        const sig = data.signal;
+        const badge = document.getElementById('sig-badge');
+        document.getElementById('sig-agent').textContent = sig.agent || 'SCANNING';
+        if (sig.type === 'BUY') {
+          badge.textContent = 'BUY XAUUSD';
+          badge.className = 'mt-4 py-4 rounded-xl text-center font-extrabold text-2xl tracking-wider bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 mono';
+        } else if (sig.type === 'SELL') {
+          badge.textContent = 'SELL XAUUSD';
+          badge.className = 'mt-4 py-4 rounded-xl text-center font-extrabold text-2xl tracking-wider bg-rose-500/20 border border-rose-500/50 text-rose-400 mono';
+        }
+        document.getElementById('sig-entry').textContent = sig.entry ? `$${sig.entry}` : '-';
+        document.getElementById('sig-sl').textContent = sig.sl ? `$${sig.sl}` : '-';
+        document.getElementById('sig-tp').textContent = sig.tp ? `$${sig.tp}` : '-';
+        document.getElementById('sig-be').textContent = sig.be_trigger ? `$${sig.be_trigger}` : '-';
+        document.getElementById('sig-lot').textContent = `${sig.lot_size} Lots (${sig.risk_pct || 0.35}%)`;
+
+        const buyVal = bt.buy_pnl !== undefined ? bt.buy_pnl : (bt.long_pnl || 0);
+        const sellVal = bt.sell_pnl !== undefined ? bt.sell_pnl : (bt.short_pnl || 0);
+        document.getElementById('buy-pnl-tag').textContent = `BUY: ${fmtMoney(buyVal)}`;
+        document.getElementById('sell-pnl-tag').textContent = `SELL: ${fmtMoney(sellVal)}`;
+
+        // Recent Trades Table (แสดง BUY / SELL)
+        const tbody = document.getElementById('trades-tbody');
+        tbody.innerHTML = (bt.recent_trades || []).map(t => {
+          const isWin = t.pnl >= 0;
+          const sideLabel = t.type === 'LONG' ? 'BUY' : (t.type === 'SHORT' ? 'SELL' : t.type);
+          return `
+            <tr class="hover:bg-slate-800/40 transition">
+              <td class="py-2 px-2 text-slate-300">${t.entry_str.slice(5)}</td>
+              <td class="py-2 px-2 font-bold ${sideLabel === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}">${sideLabel}</td>
+              <td class="py-2 px-2 text-slate-300">${t.entry} → ${t.exit}</td>
+              <td class="py-2 px-2"><span class="px-2 py-0.5 rounded bg-slate-800 text-sky-300 text-[11px]">${t.reason}</span></td>
+              <td class="py-2 px-2 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}">${fmtMoney(t.pnl)}</td>
+            </tr>
+          `;
+        }).join('');
+
+        // Render Equity Chart
+        const eqEl = document.getElementById('equity-chart');
+        eqEl.innerHTML = '';
+        const eqChart = LightweightCharts.createChart(eqEl, {
+          layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
+          grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
+          rightPriceScale: { borderColor: 'rgba(148,163,184,0.2)' },
+          timeScale: { borderColor: 'rgba(148,163,184,0.2)', timeVisible: true }
+        });
+        const areaSeries = eqChart.addAreaSeries({
+          lineColor: '#38bdf8',
+          topColor: 'rgba(56, 189, 248, 0.35)',
+          bottomColor: 'rgba(56, 189, 248, 0.0)',
+          lineWidth: 2
+        });
+        areaSeries.setData(bt.equity_curve || []);
+        eqChart.timeScale().fitContent();
+
+        // Render Candlestick Chart
+        const cEl = document.getElementById('candle-chart');
+        cEl.innerHTML = '';
+        const cChart = LightweightCharts.createChart(cEl, {
+          layout: { background: { color: 'transparent' }, textColor: '#94a3b8' },
+          grid: { vertLines: { color: 'rgba(148,163,184,0.08)' }, horzLines: { color: 'rgba(148,163,184,0.08)' } },
+          rightPriceScale: { borderColor: 'rgba(148,163,184,0.2)' },
+          timeScale: { borderColor: 'rgba(148,163,184,0.2)', timeVisible: true }
+        });
+        const candleSeries = cChart.addCandlestickSeries({
+          upColor: '#10b981', downColor: '#f43f5e', borderVisible: false,
+          wickUpColor: '#10b981', wickDownColor: '#f43f5e'
+        });
+        candleSeries.setData(data.candles || []);
+        cChart.timeScale().fitContent();
+
+      } catch (err) {
+        console.error('Dashboard Load Error:', err);
+      }
+    }
+    loadDashboard();
+  </script>
+</body>
+</html>

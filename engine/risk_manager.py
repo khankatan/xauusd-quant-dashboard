@@ -6,16 +6,15 @@ from engine.config import (
 )
 
 def get_agent_sl_tp_mult(agent_tag):
-    """ปรับระยะ SL / TP2 ตามรสชาติของตลาด"""
     if "SALTY" in agent_tag:
-        return 1.8, 2.3   # รสเค็ม (ไซด์เวย์): SL 1.8 / TP2 2.3 ATR
+        return 1.8, 2.3
     if "SOUR" in agent_tag:
-        return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): SL 2.0 / TP2 2.8 ATR
+        return 2.0, 2.8
     if "FLIP-" in agent_tag:
-        return 2.0, 3.0   # สมองซีกขวา Judas Flip: SL 2.0 / TP2 3.0 ATR
+        return 2.0, 3.0
     if "GAP-" in agent_tag:
-        return 2.0, 2.8   # สมองซีกขวาเก็บตกรายวัน: SL 2.0 / TP2 2.8 ATR
-    return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (เทรนด์): SL 2.0 / TP2 3.0 ATR
+        return 2.0, 2.8
+    return SL_ATR_MULT, TP_ATR_MULT
 
 class RiskGuard:
     def __init__(self, initial_capital=INITIAL_CAPITAL):
@@ -86,30 +85,26 @@ class RiskGuard:
             return True
         return False
 
-    def get_active_risk_pct(self, is_macro_conv=False, agent_tag="", atr_val=0.0, utc_hour=0):
+    def get_active_risk_pct(self, is_macro_conv=False, agent_tag="", atr_val=0.0, utc_hour=0, move_from_open_atr=0.0):
         is_crisis_vol = (atr_val > 11.5)
 
         if "FLIP-" in agent_tag:
-            return 0.20 if is_crisis_vol else 0.35
-        if "GAP-" in agent_tag:
-            return 0.10 if is_crisis_vol else 0.25
-
-        if self.consecutive_losses >= 2:
-            base = THROTTLED_RISK_PCT
+            base = 0.70  # คง Risk เต็ม 0.70% แม้ ATR สูง เพราะ FLIP-SESSION ชนะ 100% ในเดือน มี.ค.
+        elif "GAP-" in agent_tag:
+            base = 0.12 if (is_crisis_vol or move_from_open_atr > 4.5) else 0.30
         else:
-            if is_macro_conv and (utc_hour in [8, 9, 10, 13, 14]):
-                base = 0.52
+            if self.consecutive_losses >= 2:
+                base = 0.40
             else:
-                base = CONVICTION_RISK_PCT if is_macro_conv else BASE_RISK_PCT
-
-        if is_crisis_vol:
-            base = round(base * 0.5, 4)
+                base = 0.80 if is_macro_conv else 0.65
+            if is_crisis_vol:
+                base = round(base * 0.5, 4)
 
         if self.trades_today >= 1:
-            return round(base * 0.5, 4)
+            return round(base * 0.6, 4)
         return base
 
-    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, utc_hour=0, **kwargs):
+    def build_order(self, direction, agent_tag, entry_price, atr_val, dt, now_ts, is_macro_conv=False, utc_hour=0, move_from_open_atr=0.0, **kwargs):
         if self.trades_today == 0:
             self.first_trade_has_oi = is_macro_conv
 
@@ -119,7 +114,7 @@ class RiskGuard:
         if sl_dist <= 0:
             return None
 
-        risk_pct = self.get_active_risk_pct(is_macro_conv, agent_tag, atr_val, utc_hour)
+        risk_pct = self.get_active_risk_pct(is_macro_conv, agent_tag, atr_val, utc_hour, move_from_open_atr)
         risk_cash = self.equity * (risk_pct / 100.0)
         oz = risk_cash / sl_dist
         comm = oz * COMMISSION_PER_OZ * 2
@@ -173,9 +168,14 @@ class RiskGuard:
             return
 
         if "BE+" in exit_reason:
-            self.today_be_locked = True
-            if (not is_gap_agent) and net_pnl > 20.0:
-                self.consecutive_losses = 0
+            if net_pnl > 0:
+                # ปลดล็อกให้สามารถเปิดไม้ที่ 2 ได้หลังปิด BE+ (ไม่ล็อกวันเหมือนเดิม)
+                self.today_be_locked = False
+                self.tp_wins_today += 1
+                if (not is_gap_agent) and net_pnl > 20.0:
+                    self.consecutive_losses = 0
+            else:
+                self.today_be_locked = True
             return
 
         if ("TP2" in exit_reason or exit_reason.endswith("-TP")) and net_pnl > 0:

@@ -48,6 +48,8 @@ def run_modular_engine():
     asian_high = -np.inf
     asian_low = np.inf
     asian_bars = 0
+    lon_open = None
+    lon_close = None
     last_date = None
 
     pos = None
@@ -74,11 +76,18 @@ def run_modular_engine():
             asian_high = -np.inf
             asian_low = np.inf
             asian_bars = 0
+            lon_open = None
+            lon_close = None
 
         if (8 * 60) <= t_mins <= (13 * 60 + 45):
             asian_high = max(asian_high, float(bar["high"]))
             asian_low = min(asian_low, float(bar["low"]))
             asian_bars += 1
+
+        if 7 <= utc_hour <= 12:
+            if lon_open is None:
+                lon_open = float(bar["open"])
+            lon_close = float(bar["close"])
 
         guard.on_new_bar(bar_date)
 
@@ -92,8 +101,7 @@ def run_modular_engine():
             sl_dist = pos.get("sl_dist", pos["atr"] * SL_ATR_MULT)
             tag_prefix = f"{pos['agent']}{pos['conv']}"
 
-            # ปิด GAP-DAILY ก่อนตี 3 (02:30 น. ไทย) เพื่อไม่ให้ข้ามคืนไปขวาง SWEET-VWAP รอบเช้า
-            gap_intraday_exit = ("GAP-" in pos["agent"]) and (int(bar["thai_hour"]) == 2 and int(bar["thai_minute"]) >= 30)
+            gap_intraday_exit = (("GAP-" in pos["agent"]) or ("FLIP-" in pos["agent"])) and (int(bar["thai_hour"]) == 2 and int(bar["thai_minute"]) >= 30)
 
             if pos["type"] == "BUY":
                 fav_r = (float(bar["high"]) - pos["entry"]) / sl_dist if sl_dist > 0 else 0.0
@@ -221,11 +229,10 @@ def run_modular_engine():
                     })
                     pos = None
 
-        # ประสานสมองซีกซ้าย (Sniper) และสมองซีกขวา (Daily Gap-Filler)
         elif (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, guard.trades_today)
             if sig_dir is None and guard.trades_today == 0:
-                sig_dir, agent_tag = evaluate_gap_filler(bar, prev, guard.trades_today)
+                sig_dir, agent_tag = evaluate_gap_filler(bar, prev, guard.trades_today, lon_open, lon_close)
 
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
@@ -263,7 +270,7 @@ def run_modular_engine():
         "VWAP_PB": agent_stats(["SWEET"]),
         "EV_PB": agent_stats(["SOUR", "SALTY"]),
         "OI_BOOSTED": agent_stats(["TP1+"]),
-        "ROLLOVER": agent_stats(["GAP-", "Rollover", "Weekend-Close", "Wknd"])
+        "ROLLOVER": agent_stats(["FLIP-", "GAP-", "Rollover", "Weekend-Close", "Wknd"])
     }
 
     win_rate = (len(winners) / total_trades * 100.0) if total_trades > 0 else 0.0
@@ -283,7 +290,7 @@ def run_modular_engine():
 
     sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars, guard.trades_today)
     if sig_now is None and guard.trades_today == 0:
-        sig_now, agent_now = evaluate_gap_filler(curr, prev, guard.trades_today)
+        sig_now, agent_now = evaluate_gap_filler(curr, prev, guard.trades_today, lon_open, lon_close)
 
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
@@ -325,7 +332,7 @@ def run_modular_engine():
     else:
         sig_payload = {
             "type": "WAIT",
-            "agent": "SCANNING (V16 ISOLATED DUAL-BRAIN)",
+            "agent": "SCANNING (V17 JUDAS-FLIP DUAL-BRAIN)",
             "risk_pct": guard.get_active_risk_pct(False, "", atr_now, curr_utc_h),
             "entry": None, "sl": None, "tp1": None, "tp": None, "be_trigger": None, "lot_size": 0.0
         }
@@ -345,7 +352,7 @@ def run_modular_engine():
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_source": f"{source_name} + COMEX GC=F OI & DXY (V16 Isolated Dual-Brain)",
+        "data_source": f"{source_name} + COMEX GC=F OI & DXY (V17 Judas-Flip Dual-Brain)",
         "history_range": f"{df.iloc[0]['datetime'].strftime('%Y-%m-%d')} ถึง {df.iloc[-1]['datetime'].strftime('%Y-%m-%d')} ({total_mon_fri_days} วันทำการ)",
         "current_price": round(float(df.iloc[-1]["close"]), 2),
         "equity": round(guard.equity, 2),
@@ -381,7 +388,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V16 Isolated Dual-Brain Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
+    print(f"V17 Judas-Flip Dual-Brain Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

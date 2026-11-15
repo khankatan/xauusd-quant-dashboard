@@ -2,9 +2,10 @@ from engine.taste_buds import taste_market_flavor
 
 def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=0):
     """
-    สมองส่วนกลาง V15.4 (Hybrid Core: ไฟล์ 45 SOUR-TRAP Accuracy + ไฟล์ 46 Session/OI Filters):
-    - SOUR-TRAP: คงความเข้มงวดสูงสุดระดับไฟล์ 45 (ไม่ผ่อนปรนระยะดึงกลับ เพื่อป้องกัน Over-trade)
-    - SWEET-VWAP: กรองชั่วโมงรอยต่อ (05:00-07:00 และ 12:00-13:00 UTC) ต้องมี +OI ยืนยันเท่านั้น
+    สมองซีกซ้าย (Left-Brain Sniper Core - V16 Isolated Dual-Brain):
+    - SOUR-TRAP & SWEET-VWAP: คงความแม่นยำสูงสุดระดับไฟล์ 47
+    - Crisis Volatility Guard (ATR > 11.5): ปิด SALTY-MR ช่วงวิกฤต และบังคับ SOUR-TRAP ต้องมี +OI ยืนยัน
+    - SALTY-MR Time Filter: บล็อกชั่วโมงหลุมดำ 06:00 & 11:00 UTC (13:00 & 18:00 น. ไทย)
     """
     t_mins = int(bar["thai_mins"])
     utc_hour = int(bar["thai_hour"]) - 7
@@ -20,13 +21,13 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
     kama_p = float(bar.get("kama", vwap_p))
     tenkan_p = float(bar.get("tenkan", close_p))
     kijun_p = float(bar.get("kijun", close_p))
-    prev_tenkan = float(prev.get("tenkan", prev["close"]))
     prev_kijun = float(prev.get("kijun", prev["close"]))
 
     vwrsi_v = float(bar["vwrsi"])
     prev_rsi = float(prev["vwrsi"])
     fast_z = float(bar.get("fast_z", 0.0))
     p_accel = float(bar.get("price_accel", 0.0))
+    atr_val = float(bar["atr"])
 
     h1_bull = float(bar["h1_close"]) >= float(bar["h1_ema"])
     h1_bear = float(bar["h1_close"]) < float(bar["h1_ema"])
@@ -39,15 +40,15 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
         return None, ""
 
     has_oi = bool(info.get("has_macro_expansion", False))
-    # กฎกรองชั่วโมงรอยต่อเฉพาะ SWEET-VWAP
     is_dead_zone_utc = (5 <= utc_hour <= 7) or (utc_hour == 12)
+    is_crisis_vol = (atr_val > 11.5)
 
     # =========================================================================
-    # 1. โหมดรสหวาน (SWEET): ใช้ตัวกรอง Session & OI
+    # 1. โหมดรสหวาน (SWEET)
     # =========================================================================
     if flavor == "SWEET":
         if is_dead_zone_utc and not has_oi:
-            return None, ""  # บล็อก SWEET ที่ไม่มี OI ในชั่วโมงรอยต่อ
+            return None, ""
 
         chop_v = float(info.get("chop", 50.0))
         k_slope = float(info.get("kama_slope", 0.0))
@@ -95,29 +96,30 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
                     return "SELL", "SWEET-TK"
 
     # =========================================================================
-    # 2. โหมดรสเปรี้ยว (SOUR): รักษาความคมกริบระดับไฟล์ 45 ต้นฉบับ 100%
+    # 2. โหมดรสเปรี้ยว (SOUR): คงความคมระดับไฟล์ 47 + บังคับ +OI ช่วงตลาดวิกฤต
     # =========================================================================
     if flavor == "SOUR":
-        hemi = info.get("hemisphere", "L")
-        if hemi == "L":
-            if info["swept_low"] and h4_bull and (close_p > open_p) and (vwrsi_v > prev_rsi) and (30 <= vwrsi_v <= 52):
-                return "BUY", "SOUR-TRAP"
-            if info["swept_high"] and h4_bear and (close_p < open_p) and (vwrsi_v < prev_rsi) and (48 <= vwrsi_v <= 70):
-                return "SELL", "SOUR-TRAP"
-        else:
-            if info["swept_low"] and (h1_bull and h4_bull) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (32 <= vwrsi_v <= 52):
-                return "BUY", "SOUR-TRAP"
-            if info["swept_high"] and h4_bear and (close_p < open_p) and (vwrsi_v < prev_rsi) and (48 <= vwrsi_v <= 68):
-                return "SELL", "SOUR-TRAP"
+        if (not is_crisis_vol) or has_oi:
+            hemi = info.get("hemisphere", "L")
+            if hemi == "L":
+                if info["swept_low"] and h4_bull and (close_p > open_p) and (vwrsi_v > prev_rsi) and (30 <= vwrsi_v <= 52):
+                    return "BUY", "SOUR-TRAP"
+                if info["swept_high"] and h4_bear and (close_p < open_p) and (vwrsi_v < prev_rsi) and (48 <= vwrsi_v <= 70):
+                    return "SELL", "SOUR-TRAP"
+            else:
+                if info["swept_low"] and (h1_bull and h4_bull) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (32 <= vwrsi_v <= 52):
+                    return "BUY", "SOUR-TRAP"
+                if info["swept_high"] and h4_bear and (close_p < open_p) and (vwrsi_v < prev_rsi) and (48 <= vwrsi_v <= 68):
+                    return "SELL", "SOUR-TRAP"
 
     # =========================================================================
-    # 3. โหมดรสเค็ม (SALTY): ดักเด้งไซด์เวย์ตามโครงสร้างใหญ่ H4
+    # 3. โหมดรสเค็ม (SALTY): ปิดช่วงวิกฤต (ATR > 11.5) + ปิดชั่วโมงหลุมดำ 06:00 & 11:00 UTC
     # =========================================================================
     if flavor == "SALTY":
-        if h4_bull and (info["prev_z"] <= -1.55) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 45):
-            return "BUY", "SALTY-MR"
-
-        if h4_bear and (info["prev_z"] >= 1.55) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 55):
-            return "SELL", "SALTY-MR"
+        if (not is_crisis_vol) and (utc_hour not in [6, 11]):
+            if h4_bull and (info["prev_z"] <= -1.55) and (close_p > open_p) and (vwrsi_v > prev_rsi) and (vwrsi_v <= 45):
+                return "BUY", "SALTY-MR"
+            if h4_bear and (info["prev_z"] >= 1.55) and (close_p < open_p) and (vwrsi_v < prev_rsi) and (vwrsi_v >= 55):
+                return "SELL", "SALTY-MR"
 
     return None, ""

@@ -1,16 +1,17 @@
 from engine.config import (
     INITIAL_CAPITAL, BASE_RISK_PCT, CONVICTION_RISK_PCT, THROTTLED_RISK_PCT,
     DAILY_TARGET_PCT, HARD_DAILY_DD_PCT, MAX_TRADES_PER_DAY, STOP_ON_BE_PLUS,
-    HOUSE_MONEY_MODE, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, COMMISSION_PER_OZ
+    HOUSE_MONEY_MODE, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R, PARTIAL_TP_RATIO,
+    COMMISSION_PER_OZ
 )
 
 def get_agent_sl_tp_mult(agent_tag):
-    """ปรับระยะ SL/TP ตามบุคลิกของสมองแต่ละรสชาติ (ตามสูตรที่ทำกำไรจริงในไฟล์ 26, 29, 32)"""
+    """ปรับระยะ SL / TP2 ตามรสชาติของตลาด"""
     if "SALTY" in agent_tag:
-        return 1.8, 2.2   # รสเค็ม (ไซด์เวย์): เก็บกำไรไวในกรอบ (ชนะ 30 ไม้ +$11,263 ในไฟล์ 29)
+        return 1.8, 2.3   # รสเค็ม (ไซด์เวย์): SL 1.8 / TP2 2.3 ATR
     if "SOUR" in agent_tag:
-        return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): เก็บระยะดีดกลับปานกลาง (+$1,762 ในไฟล์ 32)
-    return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (SWEET 2.2 / 3.5): รันเทรนด์ยาว (+$3,040 ช่วง ต.ค.-พ.ย. ในไฟล์ 26)
+        return 2.0, 2.8   # รสเปรี้ยว (กับดักกวาด SL): SL 2.0 / TP2 2.8 ATR
+    return SL_ATR_MULT, TP_ATR_MULT  # รสหวาน (เทรนด์): SL 2.0 / TP2 3.0 ATR
 
 class RiskGuard:
     def __init__(self, initial_capital=INITIAL_CAPITAL):
@@ -105,25 +106,36 @@ class RiskGuard:
         conv_tag = "+OI" if is_macro_conv else ""
         step_tag = f"-H{self.trades_today}" if self.trades_today > 1 else ""
 
+        # คำนวณจุด TP1 (ระยะ 1.15 R สำหรับแบ่งปิดกำไร 50% แรก และยก SL บังหน้าทุนที่ 0.08 ATR เดิม)
+        tp1_dist = min(sl_dist * BE_TRIGGER_R, tp_dist * 0.85)
+
         if direction == "BUY":
             return {
                 "type": "BUY", "agent": agent_tag, "conv": f"{conv_tag}{step_tag}", "risk_pct": risk_pct,
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
-                "sl": entry_price - sl_dist, "tp": entry_price + tp_dist,
-                "be_trigger": entry_price + (sl_dist * BE_TRIGGER_R),
+                "sl": entry_price - sl_dist,
+                "tp1": entry_price + tp1_dist,
+                "tp": entry_price + tp_dist,
+                "be_trigger": entry_price + tp1_dist,
                 "sl_dist": sl_dist,
-                "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
+                "oz": oz, "rem_oz": oz, "comm": comm, "atr": atr_val,
+                "is_be": False, "partial_closed": False, "partial_pnl": 0.0,
+                "partial_ratio": PARTIAL_TP_RATIO, "max_fav_r": 0.0
             }
         else:
             return {
                 "type": "SELL", "agent": agent_tag, "conv": f"{conv_tag}{step_tag}", "risk_pct": risk_pct,
                 "entry": entry_price, "entry_time": now_ts,
                 "entry_str": dt.strftime("%Y-%m-%d %H:%M"), "entry_hour": dt.hour,
-                "sl": entry_price + sl_dist, "tp": entry_price - tp_dist,
-                "be_trigger": entry_price - (sl_dist * BE_TRIGGER_R),
+                "sl": entry_price + sl_dist,
+                "tp1": entry_price - tp1_dist,
+                "tp": entry_price - tp_dist,
+                "be_trigger": entry_price - tp1_dist,
                 "sl_dist": sl_dist,
-                "oz": oz, "comm": comm, "atr": atr_val, "is_be": False, "max_fav_r": 0.0
+                "oz": oz, "rem_oz": oz, "comm": comm, "atr": atr_val,
+                "is_be": False, "partial_closed": False, "partial_pnl": 0.0,
+                "partial_ratio": PARTIAL_TP_RATIO, "max_fav_r": 0.0
             }
 
     def record_close(self, net_pnl, exit_reason):
@@ -136,11 +148,15 @@ class RiskGuard:
                 self.consecutive_losses = 0
             return
 
+        # กรณีชน BE+ (ทั้งแบบแบ่งปิดกำไร TP1+BE+ หรือ Late-Night BE+): ล็อกกำไรวันนี้และรีเซ็ตสถิติแพ้ติดกัน
         if "BE+" in exit_reason:
             self.today_be_locked = True
+            if net_pnl > 20.0:
+                self.consecutive_losses = 0
             return
 
-        if "-TP" in exit_reason and net_pnl > 0:
+        # กรณีชนะชนเป้าใหญ่ TP2 (-TP1+TP2 หรือ -TP): เปิดโควตา House Money ให้มองหาไม้ถัดไปได้
+        if ("TP2" in exit_reason or exit_reason.endswith("-TP")) and net_pnl > 0:
             self.tp_wins_today += 1
             self.consecutive_losses = 0
         else:

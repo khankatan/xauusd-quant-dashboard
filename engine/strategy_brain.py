@@ -40,6 +40,9 @@ def evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, trades_today=
 
     # 1. โหมดรสหวาน (SWEET)
     if flavor == "SWEET":
+        # บล็อกชั่วโมง Pre-London / London Open Trap (06:00-07:59 UTC / 13:00-14:59 TH) เด็ดขาดแม้มี +OI (Win Rate 0%)
+        if utc_hour in [6, 7]:
+            return None, ""
         if is_dead_zone_utc and not has_oi:
             return None, ""
 

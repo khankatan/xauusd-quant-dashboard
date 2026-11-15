@@ -203,7 +203,7 @@ def run_modular_engine():
 
         # เปิดออเดอร์ใหม่เฉพาะในแท่งเทียนถัดไปเมื่อมีสัญญาณจริงจากสมอง
         elif (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
-            sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars)
+            sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, guard.trades_today)
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
                 pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv)

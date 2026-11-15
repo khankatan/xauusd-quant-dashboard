@@ -1,14 +1,14 @@
 {
-  "updated_utc": "2026-11-15 18:59:10 UTC",
+  "updated_utc": "2026-11-15 19:08:31 UTC",
   "data_source": "TwelveData Spot XAU/USD (1-Year Deep History) + COMEX GC=F OI & DXY (V19.2 SL-Recovery Dual-Brain)",
   "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-16 (185 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
-  "current_price": 3880.76,
+  "current_price": 3881.45,
   "equity": 112257.9,
   "lowest_equity": 98464.05,
-  "macro_z": -0.639,
-  "fast_z": 0.762,
-  "atr": 2.0,
-  "regime": "H1 BEAR | CHOP: 16.908 | OI+DXY: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
+  "macro_z": -0.644,
+  "fast_z": 0.704,
+  "atr": 1.86,
+  "regime": "H1 BEAR | CHOP: 16.374 | OI+DXY: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
   "signal": {
     "type": "WAIT",
     "agent": "SCANNING (V19.2 SL-RECOVERY DUAL-BRAIN)",
@@ -16221,13 +16221,6 @@
   },
   "candles": [
     {
-      "time": 1794335,
-      "open": 4119.62,
-      "high": 4119.62,
-      "low": 4112.99,
-      "close": 4115.98
-    },
-    {
       "time": 1794336,
       "open": 4116.24,
       "high": 4116.81,
@@ -18319,6 +18312,13 @@
       "high": 3880.76,
       "low": 3880.7,
       "close": 3880.76
+    },
+    {
+      "time": 1794808,
+      "open": 3880.7,
+      "high": 3881.49,
+      "low": 3880.63,
+      "close": 3881.45
     }
   ]
 }

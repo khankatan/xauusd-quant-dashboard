@@ -14,6 +14,7 @@ from engine.data_feed import fetch_market_data
 from engine.indicators import compute_all_features
 from engine.macro_oi import fetch_macro_oi_and_dxy
 from engine.strategy_brain import evaluate_signals
+from engine.gap_filler_engine import evaluate_gap_filler
 from engine.risk_manager import RiskGuard, get_agent_sl_tp_mult
 
 os.makedirs("data", exist_ok=True)
@@ -64,6 +65,9 @@ def run_modular_engine():
         bar_date = bar["thai_date"]
         now_ts = int(bar["ts"])
         t_mins = int(bar["thai_mins"])
+        utc_hour = int(bar["thai_hour"]) - 7
+        if utc_hour < 0:
+            utc_hour += 24
 
         if last_date != bar_date:
             last_date = bar_date
@@ -82,18 +86,19 @@ def run_modular_engine():
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
         is_late_night = (t_mins >= 23 * 60 + 30) or (t_mins < 3 * 60)
 
-        # บริหารออเดอร์ที่กำลังถืออยู่ (รองรับการแบ่งปิดกำไร 50% ที่ TP1 + Step-Lock Trailing ที่ 1.5R)
         if pos is not None:
             exit_price = None
             exit_reason = None
             sl_dist = pos.get("sl_dist", pos["atr"] * SL_ATR_MULT)
             tag_prefix = f"{pos['agent']}{pos['conv']}"
 
+            # ปิด GAP-DAILY ก่อนตี 3 (02:30 น. ไทย) เพื่อไม่ให้ข้ามคืนไปขวาง SWEET-VWAP รอบเช้า
+            gap_intraday_exit = ("GAP-" in pos["agent"]) and (int(bar["thai_hour"]) == 2 and int(bar["thai_minute"]) >= 30)
+
             if pos["type"] == "BUY":
                 fav_r = (float(bar["high"]) - pos["entry"]) / sl_dist if sl_dist > 0 else 0.0
                 pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                # 1. เช็กว่าชน SL ก่อนหรือไม่ในแท่งนี้
                 if float(bar["low"]) <= pos["sl"]:
                     exit_price = pos["sl"]
                     if pos.get("step_locked", False):
@@ -104,9 +109,7 @@ def run_modular_engine():
                         exit_reason = f"{tag_prefix}-BE+"
                     else:
                         exit_reason = f"{tag_prefix}-SL"
-
                 else:
-                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ +0.08 ATR)
                     if (not pos["partial_closed"]) and (float(bar["high"]) >= pos["tp1"]):
                         closed_oz = pos["oz"] * pos["partial_ratio"]
                         pos["rem_oz"] = pos["oz"] - closed_oz
@@ -115,7 +118,6 @@ def run_modular_engine():
                         pos["is_be"] = True
                         pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * BE_BUFFER_ATR))
 
-                    # --- กฎข้อ 4: Step-Lock Trailing (เมื่อวิ่งถึง 1.5R ขยับ SL ล็อกกำไรที่ TP1) ---
                     if (not pos.get("step_locked", False)) and (pos["max_fav_r"] >= STEP_LOCK_TRIGGER_R):
                         pos["step_locked"] = True
                         pos["is_be"] = True
@@ -126,10 +128,12 @@ def run_modular_engine():
                         pos["is_be"] = True
                         pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * BE_BUFFER_ATR))
 
-                    # 3. เช็กการแตะเป้าใหญ่ TP2 (สำหรับ Lot 50% ที่เหลือ) หรือปิดตามเวลาตลาด
                     if float(bar["high"]) >= pos["tp"]:
                         exit_price = pos["tp"]
                         exit_reason = f"{tag_prefix}-TP1+TP2" if pos["partial_closed"] else f"{tag_prefix}-TP"
+                    elif gap_intraday_exit:
+                        exit_price = float(bar["close"])
+                        exit_reason = f"{tag_prefix}-TP1+EOD" if pos["partial_closed"] else f"{tag_prefix}-EOD"
                     elif friday_close_now:
                         exit_price = float(bar["close"])
                         exit_reason = f"{tag_prefix}-TP1+Wknd" if pos["partial_closed"] else "Weekend-Close"
@@ -143,7 +147,7 @@ def run_modular_engine():
                     net_pnl = pos["partial_pnl"] + rem_pnl
                     eff_exit = (pos["tp1"] * pos["partial_ratio"] + exit_price * rem_ratio) if pos["partial_closed"] else exit_price
 
-                    guard.record_close(net_pnl, exit_reason)
+                    guard.record_close(net_pnl, exit_reason, pos["agent"])
                     guard.on_new_bar(bar_date)
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
@@ -158,7 +162,6 @@ def run_modular_engine():
                 fav_r = (pos["entry"] - float(bar["low"])) / sl_dist if sl_dist > 0 else 0.0
                 pos["max_fav_r"] = max(pos.get("max_fav_r", 0.0), fav_r)
 
-                # 1. เช็กว่าชน SL ก่อนหรือไม่ในแท่งนี้
                 if float(bar["high"]) >= pos["sl"]:
                     exit_price = pos["sl"]
                     if pos.get("step_locked", False):
@@ -169,9 +172,7 @@ def run_modular_engine():
                         exit_reason = f"{tag_prefix}-BE+"
                     else:
                         exit_reason = f"{tag_prefix}-SL"
-
                 else:
-                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ -0.08 ATR)
                     if (not pos["partial_closed"]) and (float(bar["low"]) <= pos["tp1"]):
                         closed_oz = pos["oz"] * pos["partial_ratio"]
                         pos["rem_oz"] = pos["oz"] - closed_oz
@@ -180,7 +181,6 @@ def run_modular_engine():
                         pos["is_be"] = True
                         pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
 
-                    # --- กฎข้อ 4: Step-Lock Trailing (เมื่อวิ่งถึง 1.5R ขยับ SL ล็อกกำไรที่ TP1) ---
                     if (not pos.get("step_locked", False)) and (pos["max_fav_r"] >= STEP_LOCK_TRIGGER_R):
                         pos["step_locked"] = True
                         pos["is_be"] = True
@@ -191,10 +191,12 @@ def run_modular_engine():
                         pos["is_be"] = True
                         pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
 
-                    # 3. เช็กการแตะเป้าใหญ่ TP2 (สำหรับ Lot 50% ที่เหลือ) หรือปิดตามเวลาตลาด
                     if float(bar["low"]) <= pos["tp"]:
                         exit_price = pos["tp"]
                         exit_reason = f"{tag_prefix}-TP1+TP2" if pos["partial_closed"] else f"{tag_prefix}-TP"
+                    elif gap_intraday_exit:
+                        exit_price = float(bar["close"])
+                        exit_reason = f"{tag_prefix}-TP1+EOD" if pos["partial_closed"] else f"{tag_prefix}-EOD"
                     elif friday_close_now:
                         exit_price = float(bar["close"])
                         exit_reason = f"{tag_prefix}-TP1+Wknd" if pos["partial_closed"] else "Weekend-Close"
@@ -208,7 +210,7 @@ def run_modular_engine():
                     net_pnl = pos["partial_pnl"] + rem_pnl
                     eff_exit = (pos["tp1"] * pos["partial_ratio"] + exit_price * rem_ratio) if pos["partial_closed"] else exit_price
 
-                    guard.record_close(net_pnl, exit_reason)
+                    guard.record_close(net_pnl, exit_reason, pos["agent"])
                     guard.on_new_bar(bar_date)
                     closed_trades.append({
                         "entry_str": pos["entry_str"], "exit_str": dt.strftime("%Y-%m-%d %H:%M"),
@@ -219,12 +221,15 @@ def run_modular_engine():
                     })
                     pos = None
 
-        # เปิดออเดอร์ใหม่เฉพาะในแท่งเทียนถัดไปเมื่อมีสัญญาณจริงจากสมอง
+        # ประสานสมองซีกซ้าย (Sniper) และสมองซีกขวา (Daily Gap-Filler)
         elif (not friday_close_now) and (not daily_rollover_now) and guard.can_trade():
             sig_dir, agent_tag = evaluate_signals(bar, prev, asian_high, asian_low, asian_bars, guard.trades_today)
+            if sig_dir is None and guard.trades_today == 0:
+                sig_dir, agent_tag = evaluate_gap_filler(bar, prev, guard.trades_today)
+
             if sig_dir is not None:
                 is_conv = bool(bar["macro_bull_conv"]) if sig_dir == "BUY" else bool(bar["macro_bear_conv"])
-                pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv)
+                pos = guard.build_order(sig_dir, agent_tag, float(bar["close"]), float(bar["atr"]), dt, now_ts, is_conv, utc_hour=utc_hour)
 
         if i % 4 == 0:
             equity_curve.append({"time": now_ts, "value": round(guard.equity, 2)})
@@ -258,7 +263,7 @@ def run_modular_engine():
         "VWAP_PB": agent_stats(["SWEET"]),
         "EV_PB": agent_stats(["SOUR", "SALTY"]),
         "OI_BOOSTED": agent_stats(["TP1+"]),
-        "ROLLOVER": agent_stats(["Rollover", "Weekend-Close", "Wknd"])
+        "ROLLOVER": agent_stats(["GAP-", "Rollover", "Weekend-Close", "Wknd"])
     }
 
     win_rate = (len(winners) / total_trades * 100.0) if total_trades > 0 else 0.0
@@ -272,7 +277,13 @@ def run_modular_engine():
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     curr_dt = curr["datetime"].to_pydatetime()
+    curr_utc_h = int(curr["thai_hour"]) - 7
+    if curr_utc_h < 0:
+        curr_utc_h += 24
+
     sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars, guard.trades_today)
+    if sig_now is None and guard.trades_today == 0:
+        sig_now, agent_now = evaluate_gap_filler(curr, prev, guard.trades_today)
 
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
@@ -284,7 +295,7 @@ def run_modular_engine():
         sl_d = atr_now * sl_m
         tp2_d = atr_now * tp_m
         tp1_d = min(sl_d * BE_TRIGGER_R, tp2_d * 0.85)
-        active_risk_now = guard.get_active_risk_pct(is_conv_now)
+        active_risk_now = guard.get_active_risk_pct(is_conv_now, agent_now, atr_now, curr_utc_h)
         lot_now = round((guard.equity * (active_risk_now / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
         sig_payload = {
             "type": sig_type,
@@ -314,8 +325,8 @@ def run_modular_engine():
     else:
         sig_payload = {
             "type": "WAIT",
-            "agent": "SCANNING (50% TP1 + STEP-LOCK READY)",
-            "risk_pct": guard.get_active_risk_pct(False),
+            "agent": "SCANNING (V16 ISOLATED DUAL-BRAIN)",
+            "risk_pct": guard.get_active_risk_pct(False, "", atr_now, curr_utc_h),
             "entry": None, "sl": None, "tp1": None, "tp": None, "be_trigger": None, "lot_size": 0.0
         }
 
@@ -334,7 +345,7 @@ def run_modular_engine():
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_source": f"{source_name} + COMEX GC=F OI & DXY (Step-Lock Trailing Mode)",
+        "data_source": f"{source_name} + COMEX GC=F OI & DXY (V16 Isolated Dual-Brain)",
         "history_range": f"{df.iloc[0]['datetime'].strftime('%Y-%m-%d')} ถึง {df.iloc[-1]['datetime'].strftime('%Y-%m-%d')} ({total_mon_fri_days} วันทำการ)",
         "current_price": round(float(df.iloc[-1]["close"]), 2),
         "equity": round(guard.equity, 2),
@@ -370,7 +381,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V15.3 Step-Lock Trailing Engine Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
+    print(f"V16 Isolated Dual-Brain Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

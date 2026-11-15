@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 
 from engine.config import (
     INITIAL_CAPITAL, SL_ATR_MULT, TP_ATR_MULT, BE_TRIGGER_R,
-    PARTIAL_TP_RATIO, BE_BUFFER_ATR, LATE_BE_TRIGGER_R, TRADES_CSV, STATE_JSON
+    PARTIAL_TP_RATIO, BE_BUFFER_ATR, LATE_BE_TRIGGER_R,
+    STEP_LOCK_TRIGGER_R, STEP_LOCK_LOCK_R, TRADES_CSV, STATE_JSON
 )
 from engine.data_feed import fetch_market_data
 from engine.indicators import compute_all_features
@@ -81,7 +82,7 @@ def run_modular_engine():
         daily_rollover_now = (int(bar["thai_hour"]) == 3 and int(bar["thai_minute"]) >= 0)
         is_late_night = (t_mins >= 23 * 60 + 30) or (t_mins < 3 * 60)
 
-        # บริหารออเดอร์ที่กำลังถืออยู่ (รองรับการแบ่งปิดกำไร 50% ที่ TP1 + กันหน้าทุน 0.08 ATR เดิม)
+        # บริหารออเดอร์ที่กำลังถืออยู่ (รองรับการแบ่งปิดกำไร 50% ที่ TP1 + Step-Lock Trailing ที่ 1.5R)
         if pos is not None:
             exit_price = None
             exit_reason = None
@@ -95,7 +96,9 @@ def run_modular_engine():
                 # 1. เช็กว่าชน SL ก่อนหรือไม่ในแท่งนี้
                 if float(bar["low"]) <= pos["sl"]:
                     exit_price = pos["sl"]
-                    if pos["partial_closed"]:
+                    if pos.get("step_locked", False):
+                        exit_reason = f"{tag_prefix}-TP1+StepLock"
+                    elif pos["partial_closed"]:
                         exit_reason = f"{tag_prefix}-TP1+BE+"
                     elif pos["is_be"]:
                         exit_reason = f"{tag_prefix}-BE+"
@@ -103,7 +106,7 @@ def run_modular_engine():
                         exit_reason = f"{tag_prefix}-SL"
 
                 else:
-                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ +0.08 ATR เดิม)
+                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ +0.08 ATR)
                     if (not pos["partial_closed"]) and (float(bar["high"]) >= pos["tp1"]):
                         closed_oz = pos["oz"] * pos["partial_ratio"]
                         pos["rem_oz"] = pos["oz"] - closed_oz
@@ -112,7 +115,13 @@ def run_modular_engine():
                         pos["is_be"] = True
                         pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * BE_BUFFER_ATR))
 
-                    # กรณีดึกหลัง 23:30 น. ถ้าราคาบวกเกิน 0.65 R แต่ยังไม่ถึง TP1 ให้ยก SL บังทุนที่ +0.08 ATR
+                    # --- กฎข้อ 4: Step-Lock Trailing (เมื่อวิ่งถึง 1.5R ขยับ SL ล็อกกำไรที่ TP1) ---
+                    if (not pos.get("step_locked", False)) and (pos["max_fav_r"] >= STEP_LOCK_TRIGGER_R):
+                        pos["step_locked"] = True
+                        pos["is_be"] = True
+                        step_lock_price = pos["entry"] + (sl_dist * STEP_LOCK_LOCK_R)
+                        pos["sl"] = max(pos["sl"], step_lock_price)
+
                     elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
                         pos["is_be"] = True
                         pos["sl"] = max(pos["sl"], pos["entry"] + (pos["atr"] * BE_BUFFER_ATR))
@@ -152,7 +161,9 @@ def run_modular_engine():
                 # 1. เช็กว่าชน SL ก่อนหรือไม่ในแท่งนี้
                 if float(bar["high"]) >= pos["sl"]:
                     exit_price = pos["sl"]
-                    if pos["partial_closed"]:
+                    if pos.get("step_locked", False):
+                        exit_reason = f"{tag_prefix}-TP1+StepLock"
+                    elif pos["partial_closed"]:
                         exit_reason = f"{tag_prefix}-TP1+BE+"
                     elif pos["is_be"]:
                         exit_reason = f"{tag_prefix}-BE+"
@@ -160,7 +171,7 @@ def run_modular_engine():
                         exit_reason = f"{tag_prefix}-SL"
 
                 else:
-                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ -0.08 ATR เดิม)
+                    # 2. เช็กการแตะจุด TP1 (แบ่งปิดกำไร 50% แรก + เลื่อน SL มาบังทุนที่ -0.08 ATR)
                     if (not pos["partial_closed"]) and (float(bar["low"]) <= pos["tp1"]):
                         closed_oz = pos["oz"] * pos["partial_ratio"]
                         pos["rem_oz"] = pos["oz"] - closed_oz
@@ -168,6 +179,13 @@ def run_modular_engine():
                         pos["partial_closed"] = True
                         pos["is_be"] = True
                         pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
+
+                    # --- กฎข้อ 4: Step-Lock Trailing (เมื่อวิ่งถึง 1.5R ขยับ SL ล็อกกำไรที่ TP1) ---
+                    if (not pos.get("step_locked", False)) and (pos["max_fav_r"] >= STEP_LOCK_TRIGGER_R):
+                        pos["step_locked"] = True
+                        pos["is_be"] = True
+                        step_lock_price = pos["entry"] - (sl_dist * STEP_LOCK_LOCK_R)
+                        pos["sl"] = min(pos["sl"], step_lock_price)
 
                     elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
                         pos["is_be"] = True
@@ -236,7 +254,6 @@ def run_modular_engine():
             "pf": round((gw / gl), 2) if gl > 0 else (9.99 if gw > 0 else 0.0)
         }
 
-    # แสดงสถิติบนการ์ด Dashboard รวมทั้งสถิติไม้ที่แบ่งปิดกำไรบางส่วน (TP1+)
     agents_breakdown = {
         "VWAP_PB": agent_stats(["SWEET"]),
         "EV_PB": agent_stats(["SOUR", "SALTY"]),
@@ -252,11 +269,10 @@ def run_modular_engine():
     net_pnl_pct = (net_pnl / INITIAL_CAPITAL) * 100.0
     avg_daily_pct = net_pnl_pct / total_mon_fri_days
 
-    # คำนวณสัญญาณสด (Live Signal) พร้อมแสดงสถานะหากมีออเดอร์กำลังถือรันอยู่ (ACTIVE / PARTIAL TP1 LOCKED)
     curr = df.iloc[-2]
     prev = df.iloc[-3]
     curr_dt = curr["datetime"].to_pydatetime()
-    sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars)
+    sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars, guard.trades_today)
 
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
@@ -283,8 +299,7 @@ def run_modular_engine():
             "partial_lot": round(lot_now * PARTIAL_TP_RATIO, 2)
         }
     elif pos is not None:
-        # กรณีไม่มีสัญญาณแท่งใหม่ แต่มีออเดอร์ที่กำลังถือรันอยู่ในตลาด -> โชว์สถานะออเดอร์และป้าย PARTIAL TP1 บน Dashboard!
-        status_badge = "🔥 TP1 (50%) LOCKED & BE+ ACTIVE" if pos["partial_closed"] else "⏳ HOLDING FOR TP1 (50%)"
+        status_badge = "🔥 STEP-LOCK / TP1 LOCKED" if pos.get("step_locked", False) else ("🔥 TP1 (50%) LOCKED & BE+ ACTIVE" if pos["partial_closed"] else "⏳ HOLDING FOR TP1 (50%)")
         sig_payload = {
             "type": f"HOLD {pos['type']}",
             "agent": f"{pos['agent']}{pos['conv']} | {status_badge}",
@@ -299,7 +314,7 @@ def run_modular_engine():
     else:
         sig_payload = {
             "type": "WAIT",
-            "agent": "SCANNING (50% TP1 + BE+ READY)",
+            "agent": "SCANNING (50% TP1 + STEP-LOCK READY)",
             "risk_pct": guard.get_active_risk_pct(False),
             "entry": None, "sl": None, "tp1": None, "tp": None, "be_trigger": None, "lot_size": 0.0
         }
@@ -319,7 +334,7 @@ def run_modular_engine():
 
     state = {
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "data_source": f"{source_name} + COMEX GC=F OI & DXY (50% Scale-Out TP1 Mode)",
+        "data_source": f"{source_name} + COMEX GC=F OI & DXY (Step-Lock Trailing Mode)",
         "history_range": f"{df.iloc[0]['datetime'].strftime('%Y-%m-%d')} ถึง {df.iloc[-1]['datetime'].strftime('%Y-%m-%d')} ({total_mon_fri_days} วันทำการ)",
         "current_price": round(float(df.iloc[-1]["close"]), 2),
         "equity": round(guard.equity, 2),
@@ -355,7 +370,7 @@ def run_modular_engine():
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
 
-    print(f"V14.3 Partial TP1 (50%) + BE+ Guard Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
+    print(f"V15.3 Step-Lock Trailing Engine Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
 
 if __name__ == "__main__":
     run_modular_engine()

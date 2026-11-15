@@ -89,7 +89,7 @@ class RiskGuard:
         is_crisis_vol = (atr_val > 11.5)
 
         if "FLIP-" in agent_tag:
-            base = 0.70  # คง Risk เต็ม 0.70% แม้ ATR สูง เพราะ FLIP-SESSION ชนะ 100% ในเดือน มี.ค.
+            base = 0.70  # คง Risk เต็ม 0.70% แม้ ATR สูง เพราะ FLIP-SESSION ทำผลงานได้ยอดเยี่ยม
         elif "GAP-" in agent_tag:
             base = 0.12 if (is_crisis_vol or move_from_open_atr > 4.5) else 0.30
         else:
@@ -169,7 +169,7 @@ class RiskGuard:
 
         if "BE+" in exit_reason:
             if net_pnl > 0:
-                # ปลดล็อกให้สามารถเปิดไม้ที่ 2 ได้หลังปิด BE+ (ไม่ล็อกวันเหมือนเดิม)
+                # ปลดล็อกให้สามารถเปิดไม้ที่ 2 ได้หลังปิด BE+ 
                 self.today_be_locked = False
                 self.tp_wins_today += 1
                 if (not is_gap_agent) and net_pnl > 20.0:

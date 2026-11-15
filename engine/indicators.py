@@ -61,7 +61,7 @@ def compute_all_features(df):
     d["atr_base"] = d["atr"].rolling(100, min_periods=20).mean()
     d["atr_ratio"] = (d["atr"] / d["atr_base"]).fillna(1.0)
 
-    # 2. Hilbert Dominant Cycle (P_t), Adaptive CHOP(P_t) & Adaptive KAMA
+    # 2. Hilbert Dominant Cycle (P_t), Adaptive CHOP, Structure Box & Dynamic Ichimoku Tenkan/Kijun
     hl2 = ((d["high"] + d["low"]) / 2.0).values
     dom_cycle = compute_hilbert_dominant_cycle(hl2, min_p=10, max_p=28)
     d["dom_cycle"] = dom_cycle
@@ -76,13 +76,22 @@ def compute_all_features(df):
     er_arr = np.full(n, 0.30)
     struct_high_arr = np.zeros(n)
     struct_low_arr = np.zeros(n)
+    tenkan_arr = np.zeros(n)
+    kijun_arr = np.zeros(n)
 
     for i in range(n):
         p = int(dom_cycle[i])
-        if i <= p:
+        # ปรับคาบเวลา Tenkan (ครึ่งรอบวัฏจักร: 0.5*P_t) และ Kijun (1.5 รอบวัฏจักร: 1.5*P_t) แบบไดนามิก
+        t_len = max(5, int(round(0.5 * p)))
+        k_len = max(13, int(round(1.5 * p)))
+
+        if i <= k_len:
             struct_high_arr[i] = high_arr[i]
             struct_low_arr[i] = low_arr[i]
+            tenkan_arr[i] = close_arr[i]
+            kijun_arr[i] = close_arr[i]
             continue
+
         sum_tr = np.sum(tr_arr[i - p + 1 : i + 1])
         hl_range = max(np.max(high_arr[i - p + 1 : i + 1]) - np.min(low_arr[i - p + 1 : i + 1]), 1e-9)
         chop_arr[i] = np.clip(100.0 * np.log10(max(sum_tr / hl_range, 1.0)) / np.log10(float(p)), 0.0, 100.0)
@@ -94,12 +103,20 @@ def compute_all_features(df):
         struct_high_arr[i] = np.max(high_arr[i - p : i])
         struct_low_arr[i] = np.min(low_arr[i - p : i])
 
+        # คำนวณ Dynamic Tenkan-sen และ Dynamic Kijun-sen (จุดสมดุล 50% ของกรอบวัฏจักร)
+        tenkan_arr[i] = 0.5 * (np.max(high_arr[i - t_len + 1 : i + 1]) + np.min(low_arr[i - t_len + 1 : i + 1]))
+        kijun_arr[i] = 0.5 * (np.max(high_arr[i - k_len + 1 : i + 1]) + np.min(low_arr[i - k_len + 1 : i + 1]))
+
     d["chop"] = chop_arr
     d["er"] = er_arr
     d["struct_high"] = struct_high_arr
     d["struct_low"] = struct_low_arr
+    d["tenkan"] = tenkan_arr
+    d["kijun"] = kijun_arr
+    # วัดระยะฉีกตัวจากเส้น Kijun (Kijun Disparity ในหน่วย ATR)
+    d["kijun_disp"] = (d["close"] - d["kijun"]) / (d["atr"] + 1e-9)
 
-    # 3. KAMA & แคลคูลัสอนุพันธ์ (Slope & Acceleration) สำหรับกรองเทรนด์แท้โดยไม่ต้องพึ่งชั่วโมงเวลา
+    # 3. KAMA & แคลคูลัสอนุพันธ์ (Slope & Acceleration)
     kama = np.zeros(n)
     kama[0] = close_arr[0]
     fast_sc = 2.0 / (3.0 + 1.0)

@@ -12,11 +12,7 @@
             theme: {
                 extend: {
                     colors: {
-                        gold: {
-                            400: '#fbbf24',
-                            500: '#f59e0b',
-                            600: '#d97706',
-                        },
+                        gold: { 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706' },
                         darksurface: '#111827',
                         cardbg: '#1f2937',
                     }
@@ -34,7 +30,6 @@
         .animate-pulse-subtle {
             animation: pulse-subtle 3s infinite ease-in-out;
         }
-        /* Custom Scrollbar for sleek look */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #111827; }
         ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
@@ -87,11 +82,11 @@
                 <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">XAUUSD Live Price</p>
                 <div class="mt-2 flex items-baseline justify-between">
                     <span id="metric-price" class="text-3xl font-extrabold text-white tracking-tight">$0.00</span>
-                    <span id="metric-price-change" class="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">+0.00%</span>
+                    <span id="metric-price-change" class="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">Live</span>
                 </div>
                 <div class="mt-3 text-xs text-gray-500 flex items-center justify-between">
-                    <span>Spread / Bid-Ask</span>
-                    <span class="text-gray-300 font-mono">Normal</span>
+                    <span>Spread / Status</span>
+                    <span class="text-gray-300 font-mono">Connected</span>
                 </div>
             </div>
 
@@ -106,7 +101,7 @@
                     <span class="text-xs text-gray-400">Target: 2.5%</span>
                 </div>
                 <div class="mt-3 w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
-                    <div id="pnl-progress" class="bg-emerald-500 h-1.5 rounded-full" style="width: 65%"></div>
+                    <div id="pnl-progress" class="bg-emerald-500 h-1.5 rounded-full" style="width: 50%"></div>
                 </div>
             </div>
 
@@ -122,7 +117,7 @@
                 </div>
                 <div class="mt-3 text-xs text-gray-500 flex items-center justify-between">
                     <span>Strategy State</span>
-                    <span id="strategy-state-badge" class="text-amber-400 font-medium">Analyzing...</span>
+                    <span id="strategy-state-badge" class="text-amber-400 font-medium">Monitoring</span>
                 </div>
             </div>
 
@@ -143,75 +138,100 @@
             </div>
         </div>
 
-        <!-- Middle Section: Visual Engine & AI Advisor Panel -->
+        <!-- Middle Section: Active Trade & Risk Management (SL, TP, BE, Close Half) + AI Advisor -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Chart / Signal Visualizer Preview -->
+            <!-- Active Order & Risk Management Status (เวอร์ชันเก่าที่ต้องการ) -->
             <div class="lg:col-span-2 bg-gray-900/70 border border-gray-800 rounded-2xl p-6 flex flex-col justify-between">
-                <div class="flex items-center justify-between mb-4">
-                    <div class="flex items-center space-x-2">
-                        <i class="fa-solid fa-chart-candlestick text-amber-400"></i>
-                        <h2 class="text-base font-bold text-white">Market & Indicator Dynamics (M15)</h2>
-                    </div>
-                    <div class="flex space-x-1 bg-gray-800/80 p-1 rounded-lg text-xs">
-                        <button class="px-3 py-1 rounded bg-amber-500 text-black font-semibold shadow">M15</button>
-                        <button class="px-3 py-1 rounded text-gray-400 hover:text-white transition">H1</button>
-                        <button class="px-3 py-1 rounded text-gray-400 hover:text-white transition">H4</button>
-                    </div>
-                </div>
-                <!-- Visual Mockup Container for Chart/Indicator -->
-                <div class="w-full h-64 bg-gray-950/60 rounded-xl border border-gray-800/80 flex flex-col items-center justify-center relative overflow-hidden p-4">
-                    <!-- Subtle background grid lines -->
-                    <div class="absolute inset-0 bg-[linear-gradient(to_right,#1f293715_1px,transparent_1px),linear-gradient(to_bottom,#1f293715_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-                    
-                    <div class="z-10 text-center space-y-2">
-                        <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse-subtle">
-                            <i class="fa-solid fa-microchip text-xl"></i>
+                <div>
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center space-x-2">
+                            <i class="fa-solid fa-crosshairs text-amber-400"></i>
+                            <h2 class="text-base font-bold text-white">Active Position & Risk Parameters</h2>
                         </div>
-                        <p class="text-sm font-medium text-gray-300">Quant Strategy Brain & Indicators Connected</p>
-                        <p class="text-xs text-gray-500 max-w-sm">ระบบกำลังประมวลผลข้อมูลราคาเชิงปริมาณ (Gap Filler & Macro OI) แบบเรียลไทม์</p>
+                        <span id="active-trade-status-badge" class="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">No Active Position</span>
+                    </div>
+
+                    <!-- Grid แสดงข้อมูล Entry / SL / TP / BE / Close Half -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+                        <div class="bg-gray-950/60 p-3.5 rounded-xl border border-gray-800/80">
+                            <span class="text-xs text-gray-400 block mb-1">Entry Price</span>
+                            <span id="trade-entry" class="text-lg font-mono font-bold text-white">-</span>
+                        </div>
+                        <div class="bg-gray-950/60 p-3.5 rounded-xl border border-gray-800/80">
+                            <span class="text-xs text-gray-400 block mb-1">Stop Loss (SL)</span>
+                            <span id="trade-sl" class="text-lg font-mono font-bold text-rose-400">-</span>
+                        </div>
+                        <div class="bg-gray-950/60 p-3.5 rounded-xl border border-gray-800/80">
+                            <span class="text-xs text-gray-400 block mb-1">Take Profit (TP)</span>
+                            <span id="trade-tp" class="text-lg font-mono font-bold text-emerald-400">-</span>
+                        </div>
+                        <div class="bg-gray-950/60 p-3.5 rounded-xl border border-gray-800/80">
+                            <span class="text-xs text-gray-400 block mb-1">Position Size</span>
+                            <span id="trade-volume" class="text-lg font-mono font-bold text-amber-400">-</span>
+                        </div>
+                    </div>
+
+                    <!-- Alerts & Management Flags (BE & Close Half Status) -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div id="be-status-card" class="p-3.5 rounded-xl bg-gray-950/40 border border-gray-800/80 flex items-center space-x-3">
+                            <div id="be-icon" class="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center text-gray-400">
+                                <i class="fa-solid fa-shield-cat"></i>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-400">Break-Even (BE) Protocol</p>
+                                <p id="be-text" class="text-sm font-semibold text-gray-300">Standby (Waiting for TP1)</p>
+                            </div>
+                        </div>
+
+                        <div id="close-half-card" class="p-3.5 rounded-xl bg-gray-950/40 border border-gray-800/80 flex items-center space-x-3">
+                            <div id="half-icon" class="w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center text-gray-400">
+                                <i class="fa-solid fa-scissors"></i>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-400">Partial Close (ปิดครึ่งหนึ่ง)</p>
+                                <p id="half-text" class="text-sm font-semibold text-gray-300">Not Triggered</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- AI Advisor / Strategy Brain Status Panel -->
+            <!-- AI Advisor / Strategy Insights Panel -->
             <div class="bg-gray-900/70 border border-gray-800 rounded-2xl p-6 flex flex-col justify-between">
                 <div>
                     <div class="flex items-center space-x-2 mb-4">
                         <i class="fa-solid fa-brain text-amber-400"></i>
-                        <h2 class="text-base font-bold text-white">Advisor & Strategy Insights</h2>
+                        <h2 class="text-base font-bold text-white">Advisor Insights</h2>
                     </div>
                     <div class="space-y-3">
                         <div class="p-3.5 rounded-xl bg-gray-950/50 border border-gray-800/80">
                             <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
-                                <span>Signal Direction</span>
-                                <span class="text-emerald-400 font-semibold uppercase">BUY BIAS</span>
+                                <span>Signal Bias</span>
+                                <span id="advisor-bias" class="text-emerald-400 font-semibold uppercase">SCANNING</span>
                             </div>
-                            <p id="advisor-msg" class="text-sm text-gray-200 font-medium">รอจังหวะย่อตัว (Pullback) บริเวณแนวรับสำคัญเพื่อเข้าสะสมสถานะ Long</p>
-                        </div>
-                        <div class="p-3.5 rounded-xl bg-gray-950/50 border border-gray-800/80">
-                            <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
-                                <span>Gap Filler Engine</span>
-                                <span class="text-blue-400 font-semibold">Active</span>
-                            </div>
-                            <p class="text-xs text-gray-300">ตรวจพบสภาพคล่องบริเวณ $2,300.00 รอเงื่อนไขการเติมเต็ม</p>
+                            <p id="advisor-msg" class="text-sm text-gray-200 font-medium">ระบบกำลังวิเคราะห์โครงสร้างตลาดและคำนวณความเสี่ยง...</p>
                         </div>
                     </div>
                 </div>
                 <div class="mt-4 pt-4 border-t border-gray-800/80 flex items-center justify-between text-xs text-gray-400">
-                    <span>Risk Manager Protocol</span>
-                    <span class="text-emerald-400 font-mono">1.0% Risk / Trade</span>
+                    <span>Risk Guard</span>
+                    <span class="text-emerald-400 font-mono">Active (1.0% Risk)</span>
                 </div>
             </div>
         </div>
 
-        <!-- Bottom Section: Recent Trades Table (all_trades.csv layout structure) -->
+        <!-- Bottom Section: Recent Trades Table + Download Button -->
         <div class="bg-gray-900/70 border border-gray-800 rounded-2xl p-6">
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
                 <div class="flex items-center space-x-2">
                     <i class="fa-solid fa-list-check text-amber-400"></i>
                     <h2 class="text-base font-bold text-white">Recent Execution Log (`all_trades.csv`)</h2>
                 </div>
-                <span class="text-xs text-gray-400">แสดงผลประวัติการเทรดล่าสุด</span>
+                <!-- ปุ่มดาวน์โหลดประวัติการเทรดที่ผู้ใช้ต้องการ -->
+                <button onclick="downloadTradeHistory()" class="flex items-center space-x-2 bg-amber-500 hover:bg-amber-600 text-black font-semibold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-amber-500/10">
+                    <i class="fa-solid fa-download"></i>
+                    <span>ดาวน์โหลดประวัติการเทรด (CSV)</span>
+                </button>
             </div>
 
             <div class="overflow-x-auto">
@@ -227,22 +247,8 @@
                         </tr>
                     </thead>
                     <tbody id="trades-table-body" class="divide-y divide-gray-800/60 text-sm">
-                        <!-- Dynamic Rows or Default Empty State -->
                         <tr class="hover:bg-gray-800/30 transition">
-                            <td class="py-3 px-4 font-mono text-gray-400">#109482</td>
-                            <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-xs bg-emerald-500/10 text-emerald-400 font-medium">BUY</span></td>
-                            <td class="py-3 px-4 font-mono">2,324.50</td>
-                            <td class="py-3 px-4 font-mono">2,335.20</td>
-                            <td class="py-3 px-4 font-mono text-gray-400">0.10</td>
-                            <td class="py-3 px-4 font-mono text-right text-emerald-400 font-semibold">+$107.00</td>
-                        </tr>
-                        <tr class="hover:bg-gray-800/30 transition">
-                            <td class="py-3 px-4 font-mono text-gray-400">#109481</td>
-                            <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-xs bg-rose-500/10 text-rose-400 font-medium">SELL</span></td>
-                            <td class="py-3 px-4 font-mono">2,320.10</td>
-                            <td class="py-3 px-4 font-mono">2,316.50</td>
-                            <td class="py-3 px-4 font-mono text-gray-400">0.10</td>
-                            <td class="py-3 px-4 font-mono text-right text-emerald-400 font-semibold">+$36.00</td>
+                            <td colspan="6" class="py-4 text-center text-gray-500 text-xs">กำลังโหลดข้อมูลการเทรด...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -256,7 +262,7 @@
         <p>XAUUSD Quantitative Dashboard &bull; Powered by Python Quant Engine & Tailwind CSS</p>
     </footer>
 
-    <!-- Script to simulate real-time lively updates and connect with backend state -->
+    <!-- JavaScript สำหรับดึงข้อมูล State และจัดการดาวน์โหลดไฟล์ -->
     <script>
         // อัปเดตเวลาปัจจุบัน
         function updateTimestamp() {
@@ -266,18 +272,143 @@
         updateTimestamp();
         setInterval(updateTimestamp, 1000);
 
-        // ตัวอย่างฟังก์ชันสำหรับดึงข้อมูล State (สามารถเชื่อมต่อกับ state.json หรือ API ภายในได้)
+        // ฟังก์ชันสำหรับดาวน์โหลดไฟล์ประวัติการเทรด
+        function downloadTradeHistory() {
+            window.location.href = './data/all_trades.csv';
+        }
+
+        // ดึงข้อมูลจาก state.json และอัปเดตหน้าจอรวมถึงการแจ้งเตือน BE / ปิดครึ่งหนึ่ง
         async function fetchDashboardState() {
             try {
-                // ตัวอย่างโครงสร้างการดึงข้อมูลจาก state.json (ถ้ามี)
-                // const response = await fetch('./data/state.json');
-                // const data = await response.json();
-                // อัปเดต UI ตามข้อมูลจริงที่นี่
-            } catch (e) {
-                console.log("Running in standalone or static mode.");
+                const response = await fetch('./data/state.json?t=' + new Date().getTime());
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+
+                // อัปเดตราคา
+                if (data.price !== undefined) {
+                    document.getElementById('metric-price').textContent = `$${Number(data.price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                }
+                // อัปเดต PnL
+                if (data.pnl !== undefined) {
+                    const pnlElem = document.getElementById('metric-pnl');
+                    const isPlus = data.pnl >= 0;
+                    pnlElem.textContent = `${isPlus ? '+' : ''}$${Number(data.pnl).toFixed(2)}`;
+                    pnlElem.className = `text-3xl font-extrabold tracking-tight ${isPlus ? 'text-emerald-400' : 'text-rose-400'}`;
+                }
+                // Win Rate & Trades
+                if (data.win_rate !== undefined) {
+                    document.getElementById('metric-winrate').textContent = `${Number(data.win_rate).toFixed(1)}%`;
+                }
+                if (data.total_trades !== undefined) {
+                    document.getElementById('metric-total-trades').textContent = `${data.total_trades} Trades`;
+                }
+                if (data.strategy_state) {
+                    document.getElementById('strategy-state-badge').textContent = data.strategy_state;
+                }
+                if (data.advisor_message) {
+                    document.getElementById('advisor-msg').textContent = data.advisor_message;
+                }
+
+                // ข้อมูล Active Trade / SL / TP / BE / Close Half (ฟีเจอร์เวอร์ชันเก่า)
+                if (data.active_trade && data.active_trade.has_position) {
+                    const t = data.active_trade;
+                    document.getElementById('active-trade-status-badge').className = "text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium";
+                    document.getElementById('active-trade-status-badge').textContent = "Position Active (" + (t.type || 'BUY') + ")";
+                    
+                    document.getElementById('trade-entry').textContent = t.entry || '-';
+                    document.getElementById('trade-sl').textContent = t.sl || '-';
+                    document.getElementById('trade-tp').textContent = t.tp || '-';
+                    document.getElementById('trade-volume').textContent = t.volume || '-';
+
+                    // ตรวจสอบ Break-Even (BE)
+                    if (t.be_triggered) {
+                        document.getElementById('be-status-card').className = "p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center space-x-3";
+                        document.getElementById('be-icon').className = "w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400";
+                        document.getElementById('be-text').className = "text-sm font-semibold text-emerald-400";
+                        document.getElementById('be-text').textContent = "BE Active (Risk-Free Set)";
+                    } else {
+                        document.getElementById('be-status-card').className = "p-3.5 rounded-xl bg-gray-950/40 border border-gray-800/80 flex items-center space-x-3";
+                        document.getElementById('be-icon').className = "w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center text-gray-400";
+                        document.getElementById('be-text').className = "text-sm font-semibold text-gray-300";
+                        document.getElementById('be-text').textContent = "Standby (Awaiting TP1)";
+                    }
+
+                    // ตรวจสอบ Close Half (ปิดครึ่งหนึ่ง)
+                    if (t.half_closed) {
+                        document.getElementById('close-half-card').className = "p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center space-x-3";
+                        document.getElementById('half-icon').className = "w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400";
+                        document.getElementById('half-text').className = "text-sm font-semibold text-blue-400";
+                        document.getElementById('half-text').textContent = "TP1 Hit: Closed 50% Position";
+                    } else {
+                        document.getElementById('close-half-card').className = "p-3.5 rounded-xl bg-gray-950/40 border border-gray-800/80 flex items-center space-x-3";
+                        document.getElementById('half-icon').className = "w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center text-gray-400";
+                        document.getElementById('half-text').className = "text-sm font-semibold text-gray-300";
+                        document.getElementById('half-text').textContent = "Full Size Active";
+                    }
+                } else {
+                    document.getElementById('active-trade-status-badge').className = "text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium";
+                    document.getElementById('active-trade-status-badge').textContent = "No Active Position";
+                    document.getElementById('trade-entry').textContent = '-';
+                    document.getElementById('trade-sl').textContent = '-';
+                    document.getElementById('trade-tp').textContent = '-';
+                    document.getElementById('trade-volume').textContent = '-';
+                }
+
+                document.getElementById('system-status').textContent = "System Active (Synced)";
+            } catch (error) {
+                console.log("Waiting for state.json...", error);
+                document.getElementById('system-status').textContent = "Waiting for Engine...";
             }
         }
+
+        // ดึงข้อมูลประวัติการเทรดจาก all_trades.csv มาแสดงในตาราง
+        async function fetchTradesHistory() {
+            try {
+                const response = await fetch('./data/all_trades.csv?t=' + new Date().getTime());
+                if (!response.ok) return;
+                const csvText = await response.text();
+                
+                const lines = csvText.trim().split('\n');
+                if (lines.length <= 1) return;
+
+                const tbody = document.getElementById('trades-table-body');
+                tbody.innerHTML = '';
+
+                // เอา 5 รายการล่าสุด
+                const rows = lines.slice(1).reverse().slice(0, 5);
+                
+                rows.forEach(row => {
+                    const cols = row.split(',');
+                    if (cols.length >= 6) {
+                        const [ticket, type, entry, exit, volume, pnl] = cols;
+                        const isBuy = type.trim().toUpperCase() === 'BUY';
+                        const pnlVal = parseFloat(pnl) || 0;
+                        
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-gray-800/30 transition';
+                        tr.innerHTML = `
+                            <td class="py-3 px-4 font-mono text-gray-400">#${ticket.trim()}</td>
+                            <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-xs ${isBuy ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'} font-medium">${type.trim()}</span></td>
+                            <td class="py-3 px-4 font-mono">${entry.trim()}</td>
+                            <td class="py-3 px-4 font-mono">${exit.trim()}</td>
+                            <td class="py-3 px-4 font-mono text-gray-400">${volume.trim()}</td>
+                            <td class="py-3 px-4 font-mono text-right ${pnlVal >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    }
+                });
+            } catch (error) {
+                console.log("Could not load all_trades.csv", error);
+            }
+        }
+
+        // รันการดึงข้อมูลทันทีและตั้งเวลา Polling ทุกๆ 3 วินาที
         fetchDashboardState();
+        fetchTradesHistory();
+        setInterval(() => {
+            fetchDashboardState();
+            fetchTradesHistory();
+        }, 3000);
     </script>
 </body>
 </html>

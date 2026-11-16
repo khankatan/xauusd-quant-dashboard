@@ -8,8 +8,8 @@ from engine.config import HISTORY_CSV
 def to_unix_seconds(series):
     return (pd.to_datetime(series, utc=True).astype("int64") // 10**9).astype(int)
 
-def fetch_twelvedata_page(api_key, end_date_str=None):
-    url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&outputsize=5000&apikey={api_key}"
+def fetch_twelvedata_page(api_key, end_date_str=None, outputsize=5000):
+    url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=15min&outputsize={outputsize}&apikey={api_key}"
     if end_date_str:
         url += f"&end_date={end_date_str}"
     res = requests.get(url, timeout=30).json()
@@ -38,24 +38,30 @@ def fetch_market_data():
 
     if api_key:
         try:
-            # หากไฟล์ประวัติดั้งเดิมมีน้อยกว่า 18,000 แท่ง ให้วนลูปดึงย้อนหลัง 5 หน้า (~25,000 แท่ง = 1 ปีเต็ม)
-            pages_to_fetch = 5 if existing_rows < 18000 else 1
-            all_pages = []
-            end_cursor = None
+            # หากมีประวัติครบ 18,000 แท่งแล้ว ให้ดึงเฉพาะ 30 แท่งล่าสุดเพื่อลดดีเลย์และประหยัดโควตา API
+            if existing_rows >= 18000:
+                df_page = fetch_twelvedata_page(api_key, None, outputsize=30)
+                if not df_page.empty:
+                    new_df = df_page
+                    source_name = "TwelveData Spot XAU/USD (Live Real-Time Sync)"
+            else:
+                pages_to_fetch = 5
+                all_pages = []
+                end_cursor = None
 
-            for p in range(pages_to_fetch):
-                df_page = fetch_twelvedata_page(api_key, end_cursor)
-                if df_page.empty:
-                    break
-                all_pages.append(df_page)
-                oldest_dt = df_page["datetime"].min()
-                end_cursor = (oldest_dt - pd.Timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
-                if p < pages_to_fetch - 1:
-                    time.sleep(8.5)  # หน่วง 8.5 วินาที ป้องกันเกินโควตา 8 ครั้ง/นาทีของ Twelve Data
+                for p in range(pages_to_fetch):
+                    df_page = fetch_twelvedata_page(api_key, end_cursor, outputsize=5000)
+                    if df_page.empty:
+                        break
+                    all_pages.append(df_page)
+                    oldest_dt = df_page["datetime"].min()
+                    end_cursor = (oldest_dt - pd.Timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S")
+                    if p < pages_to_fetch - 1:
+                        time.sleep(8.5)  # หน่วง 8.5 วินาที ป้องกันเกินโควตา 8 ครั้ง/นาทีของ Twelve Data
 
-            if all_pages:
-                new_df = pd.concat(all_pages, ignore_index=True)
-                source_name = "TwelveData Spot XAU/USD (1-Year Deep History)"
+                if all_pages:
+                    new_df = pd.concat(all_pages, ignore_index=True)
+                    source_name = "TwelveData Spot XAU/USD (1-Year Deep History)"
         except Exception as e:
             print(f"Warning Twelve Data Request Failed: {e}")
 
@@ -71,28 +77,4 @@ def fetch_market_data():
         ticker = yf.Ticker("GC=F")
         df_y = ticker.history(period="60d", interval="15m").reset_index()
         time_col = "Datetime" if "Datetime" in df_y.columns else "Date"
-        df_y["datetime"] = pd.to_datetime(df_y[time_col], utc=True)
-        new_df = df_y.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})[["datetime", "open", "high", "low", "close"]].dropna()
-        source_name = "Yahoo Finance GC=F (Fallback)"
-
-    new_df["ts"] = to_unix_seconds(new_df["datetime"])
-
-    if os.path.exists(HISTORY_CSV):
-        try:
-            old_df = pd.read_csv(HISTORY_CSV)
-            if "source" in old_df.columns and "TwelveData" in str(old_df["source"].iloc[-1]) and "TwelveData" in source_name:
-                old_df["datetime"] = pd.to_datetime(old_df["datetime"], utc=True)
-                old_df["ts"] = to_unix_seconds(old_df["datetime"])
-                combined = pd.concat([old_df[["datetime", "ts", "open", "high", "low", "close"]], new_df], ignore_index=True)
-            else:
-                combined = new_df
-        except Exception:
-            combined = new_df
-    else:
-        combined = new_df
-
-    combined = combined.drop_duplicates(subset=["ts"]).sort_values("ts").reset_index(drop=True)
-    combined = combined[combined["datetime"].dt.dayofweek < 5].reset_index(drop=True)
-    combined["source"] = source_name
-    combined.to_csv(HISTORY_CSV, index=False)
-    return combined, source_name
+        df_y

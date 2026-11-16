@@ -77,4 +77,28 @@ def fetch_market_data():
         ticker = yf.Ticker("GC=F")
         df_y = ticker.history(period="60d", interval="15m").reset_index()
         time_col = "Datetime" if "Datetime" in df_y.columns else "Date"
-        df_y
+        df_y["datetime"] = pd.to_datetime(df_y[time_col], utc=True)
+        new_df = df_y.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close"})[["datetime", "open", "high", "low", "close"]].dropna()
+        source_name = "Yahoo Finance GC=F (Fallback)"
+
+    new_df["ts"] = to_unix_seconds(new_df["datetime"])
+
+    if os.path.exists(HISTORY_CSV):
+        try:
+            old_df = pd.read_csv(HISTORY_CSV)
+            if "source" in old_df.columns and "TwelveData" in str(old_df["source"].iloc[-1]) and "TwelveData" in source_name:
+                old_df["datetime"] = pd.to_datetime(old_df["datetime"], utc=True)
+                old_df["ts"] = to_unix_seconds(old_df["datetime"])
+                combined = pd.concat([old_df[["datetime", "ts", "open", "high", "low", "close"]], new_df], ignore_index=True)
+            else:
+                combined = new_df
+        except Exception:
+            combined = new_df
+    else:
+        combined = new_df
+
+    combined = combined.drop_duplicates(subset=["ts"]).sort_values("ts").reset_index(drop=True)
+    combined = combined[combined["datetime"].dt.dayofweek < 5].reset_index(drop=True)
+    combined["source"] = source_name
+    combined.to_csv(HISTORY_CSV, index=False)
+    return combined, source_name

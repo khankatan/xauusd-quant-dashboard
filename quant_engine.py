@@ -16,8 +16,110 @@ from engine.macro_oi import fetch_macro_oi_and_dxy
 from engine.strategy_brain import evaluate_signals
 from engine.gap_filler_engine import evaluate_gap_filler
 from engine.risk_manager import RiskGuard, get_agent_sl_tp_mult
+from engine.telegram_bot import send_tg_message
 
 os.makedirs("data", exist_ok=True)
+LIVE_ALERT_FILE = "data/live_alert_state.json"
+
+def load_alert_state():
+    if os.path.exists(LIVE_ALERT_FILE):
+        try:
+            with open(LIVE_ALERT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "active_entry_time": None,
+        "sent_entry": False,
+        "sent_be": False,
+        "sent_tp1": False,
+        "sent_steplock": False,
+        "last_closed_time": None
+    }
+
+def save_alert_state(st):
+    with open(LIVE_ALERT_FILE, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=2)
+
+def dispatch_live_telegram(pos, closed_trades):
+    st = load_alert_state()
+
+    # 1. กรณีมีออเดอร์เปิดค้างอยู่ (pos is not None)
+    if pos is not None:
+        if st.get("active_entry_time") != pos["entry_time"]:
+            st = {
+                "active_entry_time": pos["entry_time"],
+                "sent_entry": False,
+                "sent_be": False,
+                "sent_tp1": False,
+                "sent_steplock": False,
+                "last_closed_time": st.get("last_closed_time")
+            }
+
+        # 1.1 แจ้งเตือนจุดเข้า (Entry)
+        if not st["sent_entry"]:
+            msg = (
+                f"🚨 <b>XAUUSD SIGNAL: {pos['type']}</b>\n"
+                f"🤖 กลยุทธ์: <code>{pos['agent']}{pos['conv']}</code>\n"
+                f"📍 <b>จุดเข้า (Entry):</b> {pos['entry']:.2f}\n"
+                f"🛑 <b>SL:</b> {pos['sl']:.2f}\n"
+                f"🎯 <b>TP1 (ปิด 50% @ {BE_TRIGGER_R}R):</b> {pos['tp1']:.2f}\n"
+                f"🏆 <b>TP2 (เป้าหมายหลัก):</b> {pos['tp']:.2f}\n"
+                f"⚖️ Risk: {pos['risk_pct']}%"
+            )
+            if send_tg_message(msg):
+                st["sent_entry"] = True
+
+        # 1.2 แจ้งเตือนชน TP1 (ปิด 50% + เลื่อน SL บังหน้าทุน)
+        if pos.get("partial_closed", False) and not st["sent_tp1"]:
+            msg = (
+                f"💰 <b>TP1 HIT! ปิดกำไร 50% แล้ว ({pos['type']})</b>\n"
+                f"📍 ราคาเข้า: {pos['entry']:.2f} | TP1: {pos['tp1']:.2f}\n"
+                f"🛡️ <b>เลื่อน SL บังหน้าทุน (+{BE_BUFFER_ATR} ATR):</b> <code>{pos['sl']:.2f}</code>\n"
+                f"🚀 ถือลุ้นต่อเป้าหมาย TP2: {pos['tp']:.2f}"
+            )
+            if send_tg_message(msg):
+                st["sent_tp1"] = True
+                st["sent_be"] = True
+
+        # 1.3 แจ้งเตือนบังหน้าทุนรอบดึก (Late Night BE @ 0.65R เวลา 23:30-03:00 น.)
+        elif pos.get("is_be", False) and not st["sent_be"]:
+            msg = (
+                f"🛡️ <b>LATE-NIGHT BREAKEVEN ({pos['type']})</b>\n"
+                f"⏰ เข้าช่วงดึก (23:30-03:00 น.) และราคาวิ่งถึง {LATE_BE_TRIGGER_R}R\n"
+                f"🔒 <b>เลื่อน SL มาบังหน้าทุนที่:</b> <code>{pos['sl']:.2f}</code> (Entry: {pos['entry']:.2f})"
+            )
+            if send_tg_message(msg):
+                st["sent_be"] = True
+
+        # 1.4 แจ้งเตือนขยับ SL ขึ้นไปอีก (Step-Lock @ 1.5R -> ล็อกที่ 1.15R)
+        if pos.get("step_locked", False) and not st["sent_steplock"]:
+            msg = (
+                f"🔥 <b>STEP-LOCK TRAILING ACTIVE! ({pos['type']})</b>\n"
+                f"📈 ราคาวิ่งทะลุ <b>{STEP_LOCK_TRIGGER_R}R</b> เรียบร้อย!\n"
+                f"🔒 <b>ขยับ SL ล็อกกำไรเพิ่มขึ้นมาที่ระดับ TP1 ({STEP_LOCK_LOCK_R}R):</b> <code>{pos['sl']:.2f}</code>\n"
+                f"🎯 ปล่อยรันลุ้น TP2: {pos['tp']:.2f}"
+            )
+            if send_tg_message(msg):
+                st["sent_steplock"] = True
+
+        save_alert_state(st)
+
+    # 2. กรณีไม่มีออเดอร์ค้าง (เพิ่งปิดออเดอร์ไป)
+    elif closed_trades:
+        latest = closed_trades[-1]
+        if st.get("last_closed_time") != latest["exit_time"] and st.get("active_entry_time") == latest["entry_time"]:
+            icon = "✅" if latest["pnl"] > 0 else "❌"
+            msg = (
+                f"{icon} <b>ปิดออเดอร์เรียบร้อย ({latest['type']})</b>\n"
+                f"📌 สาเหตุ: <code>{latest['reason']}</code>\n"
+                f"📍 เข้า: {latest['entry']:.2f} ➔ ออก: {latest['exit']:.2f}\n"
+                f"💵 <b>PnL:</b> {'+' if latest['pnl'] > 0 else ''}${latest['pnl']:.2f}"
+            )
+            if send_tg_message(msg):
+                st["last_closed_time"] = latest["exit_time"]
+                st["active_entry_time"] = None
+                save_alert_state(st)
 
 def is_us_dst_active(utc_dt):
     year = utc_dt.year
@@ -199,7 +301,7 @@ def run_modular_engine():
 
                     elif (not pos["is_be"]) and is_late_night and (pos["max_fav_r"] >= LATE_BE_TRIGGER_R):
                         pos["is_be"] = True
-                        pos["sl"] = min(pos["sl"], pos["entry"] - (sl_dist * BE_BUFFER_ATR))
+                        pos["sl"] = min(pos["sl"], pos["entry"] - (pos["atr"] * BE_BUFFER_ATR))
 
                     if float(bar["low"]) <= pos["tp"]:
                         exit_price = pos["tp"]
@@ -392,6 +494,9 @@ def run_modular_engine():
 
     with open(STATE_JSON, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, allow_nan=False)
+
+    # ส่งแจ้งเตือนเข้า Telegram แบบเรียลไทม์ตามสถานะล่าสุด
+    dispatch_live_telegram(pos, closed_trades)
 
     print(f"V23.3 Complete | Net PnL: ${state['backtest']['net_pnl']} | PF: {state['backtest']['profit_factor']} | WR: {state['backtest']['win_rate']}% | MaxOverallDD: {state['backtest']['max_overall_dd_pct']}%")
 

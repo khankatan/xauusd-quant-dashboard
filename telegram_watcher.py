@@ -44,6 +44,7 @@ def load_memory():
     }
 
 def save_memory(mem):
+    os.makedirs(os.path.dirname(ALERT_MEMORY), exist_ok=True)
     with open(ALERT_MEMORY, "w", encoding="utf-8") as f:
         json.dump(mem, f, indent=2)
 
@@ -59,16 +60,17 @@ def check_and_notify():
     agent_txt = str(sig.get("agent", ""))
     mem = load_memory()
 
-    # 1. กรณีมีสัญญาณเปิดใหม่ (BUY / SELL) หรือกำลังถือออเดอร์ (HOLD BUY / HOLD SELL)
+    # 1. กรณีมีสัญญาณเข้าใหม่ (BUY / SELL) หรือกำลังถือออเดอร์ (HOLD BUY / HOLD SELL)
     if sig_type in ["BUY", "SELL", "HOLD BUY", "HOLD SELL"]:
         direction = sig_type.replace("HOLD ", "")
         entry_p = sig.get("entry")
         sl_p = sig.get("sl")
         tp1_p = sig.get("tp1")
         tp2_p = sig.get("tp")
-        risk_pct = sig.get("risk_pct")
+        risk_pct = sig.get("risk_pct", 0)
+        lot_size = float(sig.get("lot_size", 0.0))
+        half_lot = round(lot_size * 0.5, 2)
 
-        # สร้าง ID อ้างอิงออเดอร์จาก ทิศทาง + ราคาเข้า
         trade_id = f"{direction}_{entry_p}"
 
         if mem.get("active_trade_id") != trade_id:
@@ -80,7 +82,7 @@ def check_and_notify():
                 "last_closed_exit_time": mem.get("last_closed_exit_time")
             }
 
-        # 1.1 แจ้งจุดเข้า Entry, SL, TP1, TP2
+        # 1.1 แจ้งจุดเข้า Entry, SL, TP1, TP2 และขนาด Lot
         if not mem["sent_entry"]:
             msg = (
                 f"🚨 <b>XAUUSD SIGNAL: {direction}</b>\n"
@@ -89,18 +91,19 @@ def check_and_notify():
                 f"🛑 <b>SL:</b> {sl_p}\n"
                 f"🎯 <b>TP1 (ปิด 50% @ 1.15R):</b> {tp1_p}\n"
                 f"🏆 <b>TP2 (เป้าหมายหลัก):</b> {tp2_p}\n"
+                f"📦 <b>ขนาด Lot:</b> <code>{lot_size:.2f} Lot</code> (แบ่งปิด TP1: {half_lot:.2f} Lot)\n"
                 f"⚖️ Risk: {risk_pct}%"
             )
             if send_tg(msg):
                 mem["sent_entry"] = True
 
-        # 1.2 แจ้งจังหวะขยับ SL ขึ้นไปอีก (Step-Lock @ 1.5R -> ล็อกที่ TP1 / 1.15R)
+        # 1.2 แจ้งจังหวะขยับ SL ขึ้นไปอีก (Step-Lock @ 1.50R -> ล็อกที่ TP1 / 1.15R)
         if "STEP-LOCK" in agent_txt and not mem["sent_steplock"]:
             msg = (
                 f"🔥 <b>STEP-LOCK TRAILING ACTIVE! ({direction})</b>\n"
                 f"📈 ราคาวิ่งทะลุ <b>1.50R</b> เรียบร้อย!\n"
                 f"🔒 <b>ขยับ SL ล็อกกำไรเพิ่มขึ้นมาที่ระดับ TP1 (1.15R):</b> <code>{sl_p}</code>\n"
-                f"🎯 ปล่อยรันลุ้น TP2: {tp2_p}"
+                f"🎯 ปล่อยรันลุ้น TP2: {tp2_p} (เหลือถือ: {lot_size:.2f} Lot)"
             )
             if send_tg(msg):
                 mem["sent_steplock"] = True
@@ -112,7 +115,7 @@ def check_and_notify():
                 f"🛡️ <b>เลื่อน SL บังหน้าทุนเรียบร้อย ({direction})</b>\n"
                 f"📍 ราคาเข้า: {entry_p} | TP1: {tp1_p}\n"
                 f"🔒 <b>SL ใหม่ (กันทุน +0.08 ATR):</b> <code>{sl_p}</code>\n"
-                f"🚀 ถือลุ้นเป้าหมาย TP2: {tp2_p}"
+                f"🚀 ถือลุ้นเป้าหมาย TP2: {tp2_p} (เหลือถือ: {lot_size:.2f} Lot)"
             )
             if send_tg(msg):
                 mem["sent_be"] = True

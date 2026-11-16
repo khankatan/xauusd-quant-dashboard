@@ -1,24 +1,24 @@
 {
-  "updated_utc": "2026-11-15 23:07:29 UTC",
+  "updated_utc": "2026-11-16 01:00:06 UTC",
   "data_source": "TwelveData Spot XAU/USD (1-Year Deep History) + COMEX GC=F OI & DXY (V23.3 FTMO-Scaled Dual-Brain)",
   "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-16 (185 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
-  "current_price": 3886.22,
+  "current_price": 3893.58,
   "equity": 126784.96,
   "lowest_equity": 98440.38,
-  "macro_z": -0.695,
-  "fast_z": -0.039,
-  "atr": 0.86,
-  "regime": "H1 BEAR | CHOP: 48.233 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
+  "macro_z": -0.417,
+  "fast_z": 0.406,
+  "atr": 4.11,
+  "regime": "H1 BEAR | CHOP: 30.15 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
   "signal": {
-    "type": "WAIT",
-    "agent": "SCANNING (V23.3 FTMO-SCALED DUAL-BRAIN)",
+    "type": "HOLD SELL",
+    "agent": "SOUR-TRAP | \u23f3 HOLDING FOR TP1 (50%)",
     "risk_pct": 0.65,
-    "entry": null,
-    "sl": null,
-    "tp1": null,
-    "tp": null,
-    "be_trigger": null,
-    "lot_size": 0.0
+    "entry": 3890.71,
+    "sl": 3898.56,
+    "tp1": 3881.69,
+    "tp": 3879.73,
+    "be_trigger": 3881.69,
+    "lot_size": 1.05
   },
   "backtest": {
     "net_pnl": 26784.96,
@@ -16232,52 +16232,14 @@
       {
         "time": 1794821,
         "value": 126784.96
+      },
+      {
+        "time": 1794825,
+        "value": 126784.96
       }
     ]
   },
   "candles": [
-    {
-      "time": 1794351,
-      "open": 4072.52,
-      "high": 4078.44,
-      "low": 4072.52,
-      "close": 4077.98
-    },
-    {
-      "time": 1794352,
-      "open": 4076.98,
-      "high": 4078.8,
-      "low": 4075.15,
-      "close": 4076.31
-    },
-    {
-      "time": 1794353,
-      "open": 4076.02,
-      "high": 4078.14,
-      "low": 4073.86,
-      "close": 4076.47
-    },
-    {
-      "time": 1794354,
-      "open": 4076.7,
-      "high": 4080.13,
-      "low": 4075.56,
-      "close": 4078.19
-    },
-    {
-      "time": 1794355,
-      "open": 4077.68,
-      "high": 4079.63,
-      "low": 4073.32,
-      "close": 4075.79
-    },
-    {
-      "time": 1794356,
-      "open": 4076.03,
-      "high": 4077.47,
-      "low": 4068.16,
-      "close": 4071.61
-    },
     {
       "time": 1794357,
       "open": 4070.37,
@@ -18335,6 +18297,48 @@
       "high": 3886.95,
       "low": 3874.32,
       "close": 3886.22
+    },
+    {
+      "time": 1794824,
+      "open": 3884.1,
+      "high": 3884.1,
+      "low": 3878.07,
+      "close": 3881.34
+    },
+    {
+      "time": 1794825,
+      "open": 3889.53,
+      "high": 3900.92,
+      "low": 3888.13,
+      "close": 3900.5
+    },
+    {
+      "time": 1794826,
+      "open": 3900.35,
+      "high": 3901.18,
+      "low": 3890.53,
+      "close": 3890.71
+    },
+    {
+      "time": 1794827,
+      "open": 3891.2,
+      "high": 3892.91,
+      "low": 3888.47,
+      "close": 3888.74
+    },
+    {
+      "time": 1794828,
+      "open": 3889.21,
+      "high": 3889.5,
+      "low": 3883.5,
+      "close": 3885.04
+    },
+    {
+      "time": 1794829,
+      "open": 3886.04,
+      "high": 3896.36,
+      "low": 3883.55,
+      "close": 3893.58
     }
   ]
 }

@@ -1,41 +1,41 @@
 {
-  "updated_utc": "2026-11-17 05:03:52 UTC",
+  "updated_utc": "2026-11-17 06:02:26 UTC",
   "data_source": "TwelveData Spot XAU/USD (1-Year Deep History) + COMEX GC=F OI & DXY (V23.3 FTMO-Scaled Dual-Brain)",
   "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-17 (186 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
-  "current_price": 3875.2,
-  "equity": 127673.54,
+  "current_price": 3881.44,
+  "equity": 126839.79,
   "lowest_equity": 98412.83,
-  "macro_z": 1.387,
-  "fast_z": 1.286,
-  "atr": 7.2,
-  "regime": "H1 BULL | CHOP: 48.656 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
+  "macro_z": 1.973,
+  "fast_z": 1.443,
+  "atr": 7.06,
+  "regime": "H1 BULL | CHOP: 43.537 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
   "signal": {
-    "type": "HOLD SELL",
-    "agent": "SALTY-MR | \u23f3 HOLDING FOR TP1 (50%)",
-    "risk_pct": 0.65,
-    "entry": 3865.4,
-    "sl": 3880.41,
-    "tp1": 3849.1,
-    "tp": 3846.22,
-    "be_trigger": 3849.1,
-    "lot_size": 0.55
+    "type": "WAIT",
+    "agent": "SCANNING (V23.3 FTMO-SCALED DUAL-BRAIN)",
+    "risk_pct": 0.39,
+    "entry": null,
+    "sl": null,
+    "tp1": null,
+    "tp": null,
+    "be_trigger": null,
+    "lot_size": 0.0
   },
   "backtest": {
-    "net_pnl": 27673.54,
-    "net_pnl_pct": 27.67,
-    "avg_daily_pct": 0.149,
+    "net_pnl": 26839.79,
+    "net_pnl_pct": 26.84,
+    "avg_daily_pct": 0.144,
     "max_overall_dd_pct": 1.59,
     "max_overall_dd_cash": 1587.17,
     "max_daily_dd_pct": 0.8,
     "max_daily_dd_cash": 820.05,
     "worst_dd_date": "2026-04-10",
-    "total_trades": 181,
+    "total_trades": 182,
     "total_bdays": 186,
-    "win_rate": 62.98,
-    "profit_factor": 1.97,
+    "win_rate": 62.64,
+    "profit_factor": 1.92,
     "days_hit_target": 65,
     "buy_pnl": 7078.01,
-    "sell_pnl": 20595.55,
+    "sell_pnl": 19761.8,
     "agents": {
       "VWAP_PB": {
         "trades": 36,
@@ -44,10 +44,10 @@
         "pf": 1.51
       },
       "EV_PB": {
-        "trades": 48,
-        "win_rate": 70.8,
-        "net_pnl": 14195.58,
-        "pf": 2.46
+        "trades": 49,
+        "win_rate": 69.4,
+        "net_pnl": 13361.83,
+        "pf": 2.27
       },
       "OI_BOOSTED": {
         "trades": 85,
@@ -63,6 +63,18 @@
       }
     },
     "recent_trades": [
+      {
+        "entry_str": "2026-11-17 12:45",
+        "exit_str": "2026-11-17 16:15",
+        "entry_time": 1794919,
+        "exit_time": 1794932,
+        "entry_hour_utc": 12,
+        "type": "SELL",
+        "entry": 3865.4,
+        "exit": 3880.41,
+        "pnl": -833.75,
+        "reason": "SALTY-MR-SL"
+      },
       {
         "entry_str": "2026-11-16 11:00",
         "exit_str": "2026-11-16 12:00",
@@ -290,18 +302,6 @@
         "exit": 4143.83,
         "pnl": -812.83,
         "reason": "SWEET-VWAP-SL"
-      },
-      {
-        "entry_str": "2026-10-19 16:30",
-        "exit_str": "2026-10-19 17:30",
-        "entry_time": 1792427,
-        "exit_time": 1792431,
-        "entry_hour_utc": 16,
-        "type": "BUY",
-        "entry": 4184.81,
-        "exit": 4171.9,
-        "pnl": -375.97,
-        "reason": "GAP-DAILY-SL"
       }
     ],
     "equity_curve": [
@@ -16340,31 +16340,14 @@
       {
         "time": 1794929,
         "value": 127673.54
+      },
+      {
+        "time": 1794933,
+        "value": 126839.79
       }
     ]
   },
   "candles": [
-    {
-      "time": 1794459,
-      "open": 3993.98,
-      "high": 3994.2,
-      "low": 3987.72,
-      "close": 3994.0
-    },
-    {
-      "time": 1794460,
-      "open": 3993.65,
-      "high": 3993.82,
-      "low": 3991.06,
-      "close": 3992.28
-    },
-    {
-      "time": 1794461,
-      "open": 3992.43,
-      "high": 3995.21,
-      "low": 3989.95,
-      "close": 3991.09
-    },
     {
       "time": 1794462,
       "open": 3990.9,
@@ -18443,6 +18426,27 @@
       "high": 3875.22,
       "low": 3874.38,
       "close": 3875.2
+    },
+    {
+      "time": 1794932,
+      "open": 3873.4,
+      "high": 3883.38,
+      "low": 3872.67,
+      "close": 3882.82
+    },
+    {
+      "time": 1794933,
+      "open": 3878.98,
+      "high": 3886.42,
+      "low": 3878.98,
+      "close": 3881.0
+    },
+    {
+      "time": 1794934,
+      "open": 3880.65,
+      "high": 3881.54,
+      "low": 3880.65,
+      "close": 3881.44
     }
   ]
 }

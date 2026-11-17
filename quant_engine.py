@@ -286,54 +286,53 @@ def run_modular_engine():
     avg_daily_pct = net_pnl_pct / total_mon_fri_days
 
     curr = df.iloc[-2]
-    prev = df.iloc[-3]
     curr_dt = curr["datetime"].to_pydatetime()
     curr_utc_h = int(curr["thai_hour"]) - 7
     if curr_utc_h < 0:
         curr_utc_h += 24
 
-    sig_now, agent_now = evaluate_signals(curr, prev, asian_high, asian_low, asian_bars, guard.trades_today, day_open)
-    if sig_now is None:
-        sig_now, agent_now = evaluate_gap_filler(curr, prev, guard.trades_today, lon_open, lon_close)
-
     entry_now = float(curr["close"])
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
     move_open_now = abs(entry_now - day_open) / atr_now if (day_open is not None and atr_now > 0) else 0.0
 
-    if sig_now and not must_close_for_weekend(curr_dt):
-        sig_type = sig_now
-        is_conv_now = bool(curr["macro_bull_conv"]) if sig_type == "BUY" else bool(curr["macro_bear_conv"])
-        sl_m, tp_m = get_agent_sl_tp_mult(agent_now)
-        sl_d = atr_now * sl_m
-        tp2_d = atr_now * tp_m
-        tp1_d = min(sl_d * BE_TRIGGER_R, tp2_d * 0.85)
-        active_risk_now = guard.get_active_risk_pct(is_conv_now, agent_now, atr_now, curr_utc_h, move_open_now)
-        lot_now = round((guard.equity * (active_risk_now / 100.0)) / (sl_d * 100.0), 2) if sl_d > 0 else 0.0
-        sig_payload = {
-            "type": sig_type,
-            "agent": f"{agent_now}{'+OI' if is_conv_now else ''} [TP1 50% @ {BE_TRIGGER_R}R]",
-            "risk_pct": active_risk_now,
-            "entry": round(entry_now, 2),
-            "sl": round(entry_now - sl_d if sig_type == "BUY" else entry_now + sl_d, 2),
-            "tp1": round(entry_now + tp1_d if sig_type == "BUY" else entry_now - tp1_d, 2),
-            "tp": round(entry_now + tp2_d if sig_type == "BUY" else entry_now - tp2_d, 2),
-            "be_trigger": round(entry_now + tp1_d if sig_type == "BUY" else entry_now - tp1_d, 2),
-            "lot_size": lot_now,
-            "partial_lot": round(lot_now * PARTIAL_TP_RATIO, 2)
-        }
-    elif pos is not None:
-        status_badge = "🔥 STEP-LOCK / TP1 LOCKED" if pos.get("step_locked", False) else ("🔥 TP1 (50%) LOCKED & BE+ ACTIVE" if pos["partial_closed"] else "⏳ HOLDING FOR TP1 (50%)")
-        sig_payload = {
-            "type": f"HOLD {pos['type']}",
-            "agent": f"{pos['agent']}{pos['conv']} | {status_badge}",
-            "risk_pct": pos["risk_pct"],
-            "entry": round(pos["entry"], 2),
-            "sl": round(pos["sl"], 2),
-            "tp1": round(pos["tp1"], 2),
-            "tp": round(pos["tp"], 2),
-            "be_trigger": round(pos["tp1"], 2),
-            "lot_size": round(pos["rem_oz"] / 100.0, 2)
-        }
+    # เช็กอายุแท่งเทียน curr ป้องกันการดึงแท่งเก่าค้างข้ามวันมายิงสัญญาณผีช่วงตลาดปิด/เปิด 06:30 น.
+    now_utc = datetime.now(timezone.utc)
+    if curr_dt.tzinfo is None:
+        curr_dt_utc = curr_dt.replace(tzinfo=timezone.utc)
+    else:
+        curr_dt_utc = curr_dt
+    bar_age_mins = (now_utc - curr_dt_utc).total_seconds() / 60.0
+    is_fresh_bar = (bar_age_mins <= 35.0)
+
+    # ยึดสถานะ pos จากลูป Backtest 100% ห้ามคำนวณ sig_now แยกต่างหากเพื่อป้องกันการยิงออเดอร์ซ้ำ
+    if pos is not None:
+        is_fresh_entry = (pos["entry_time"] == int(curr["ts"])) and is_fresh_bar
+        if is_fresh_entry:
+            sig_payload = {
+                "type": pos["type"],
+                "agent": f"{pos['agent']}{pos['conv']} [TP1 50% @ {BE_TRIGGER_R}R]",
+                "risk_pct": pos["risk_pct"],
+                "entry": round(pos["entry"], 2),
+                "sl": round(pos["sl"], 2),
+                "tp1": round(pos["tp1"], 2),
+                "tp": round(pos["tp"], 2),
+                "be_trigger": round(pos["tp1"], 2),
+                "lot_size": round(pos["oz"] / 100.0, 2),
+                "partial_lot": round((pos["oz"] * pos["partial_ratio"]) / 100.0, 2)
+            }
+        else:
+            status_badge = "🔥 STEP-LOCK / TP1 LOCKED" if pos.get("step_locked", False) else ("🔥 TP1 (50%) LOCKED & BE+ ACTIVE" if pos["partial_closed"] else "⏳ HOLDING FOR TP1 (50%)")
+            sig_payload = {
+                "type": f"HOLD {pos['type']}",
+                "agent": f"{pos['agent']}{pos['conv']} | {status_badge}",
+                "risk_pct": pos["risk_pct"],
+                "entry": round(pos["entry"], 2),
+                "sl": round(pos["sl"], 2),
+                "tp1": round(pos["tp1"], 2),
+                "tp": round(pos["tp"], 2),
+                "be_trigger": round(pos["tp1"], 2),
+                "lot_size": round(pos["rem_oz"] / 100.0, 2)
+            }
     else:
         sig_payload = {
             "type": "WAIT",
@@ -351,7 +350,7 @@ def run_modular_engine():
         return 0.0 if (val is None or (isinstance(val, float) and math.isnan(val))) else round(float(val), 3)
 
     h1_txt = "H1 BULL" if curr["h1_close"] >= curr["h1_ema"] else "H1 BEAR"
-    dst_txt = "US-SUMMER (Close 03:00 TH)" if is_us_dst_active(curr_dt) else "US-WINTER (Close 03:00 TH)"
+    dst_txt = "US-SUMMER (Close 03:00 TH)" if is_us_dst_active(curr_dt_utc) else "US-WINTER (Close 03:00 TH)"
     macro_txt = str(curr["macro_status"]) if "macro_status" in curr else "OI+DXY: STANDARD"
     regime_label = f"{h1_txt} | CHOP: {clean_num(curr.get('chop', 50.0))} | {macro_txt} | {dst_txt}"
 

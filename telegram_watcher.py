@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 
 STATE_JSON = "data/state.json"
 TRADES_CSV = "data/all_trades.csv"
@@ -40,7 +41,8 @@ def load_memory():
         "sent_entry": False,
         "sent_be": False,
         "sent_steplock": False,
-        "last_closed_exit_time": None
+        "last_closed_exit_time": None,
+        "last_heartbeat_date": None
     }
 
 def save_memory(mem):
@@ -59,6 +61,23 @@ def check_and_notify():
     sig_type = str(sig.get("type", "WAIT"))
     agent_txt = str(sig.get("agent", ""))
     mem = load_memory()
+
+    # 0. ส่งข้อความเช็กสถานะบอททุกเช้าเวลา 07:00 น. เวลาไทย (วันจันทร์-ศุกร์) พร้อมบอกวันที่
+    thai_now = datetime.now(timezone.utc) + timedelta(hours=7)
+    today_str = thai_now.strftime("%Y-%m-%d")
+    thai_days = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"]
+    day_name = thai_days[thai_now.weekday()]
+
+    if thai_now.weekday() < 5 and thai_now.hour == 7 and thai_now.minute < 15:
+        if mem.get("last_heartbeat_date") != today_str:
+            hb_msg = (
+                f"☀️ <b>MORNING CHECK-IN: บอททำงานปกติ (24/7)</b>\n"
+                f"📅 <b>วัน{day_name}ที่ {thai_now.strftime('%d/%m/%Y')}</b> | เวลา: {thai_now.strftime('%H:%M')} น.\n"
+                f"⏳ สถานะระบบ: พร้อมทำงาน (เริ่มเปิดรับสัญญาณเทรด 09:30 น. เป็นต้นไป)"
+            )
+            if send_tg(hb_msg):
+                mem["last_heartbeat_date"] = today_str
+                save_memory(mem)
 
     # 1. กรณีมีสัญญาณเข้าใหม่ (BUY / SELL) หรือกำลังถือออเดอร์ (HOLD BUY / HOLD SELL)
     if sig_type in ["BUY", "SELL", "HOLD BUY", "HOLD SELL"]:
@@ -79,7 +98,8 @@ def check_and_notify():
                 "sent_entry": False,
                 "sent_be": False,
                 "sent_steplock": False,
-                "last_closed_exit_time": mem.get("last_closed_exit_time")
+                "last_closed_exit_time": mem.get("last_closed_exit_time"),
+                "last_heartbeat_date": mem.get("last_heartbeat_date")
             }
 
         # 1.1 แจ้งจุดเข้า Entry, SL, TP1, TP2 และขนาด Lot

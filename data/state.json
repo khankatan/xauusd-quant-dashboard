@@ -1,14 +1,14 @@
 {
-  "updated_utc": "2026-11-17 06:35:57 UTC",
+  "updated_utc": "2026-11-17 08:39:33 UTC",
   "data_source": "TwelveData Spot XAU/USD (1-Year Deep History) + COMEX GC=F OI & DXY (V23.3 FTMO-Scaled Dual-Brain)",
   "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-17 (186 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
-  "current_price": 3875.0,
+  "current_price": 3866.4,
   "equity": 126839.79,
   "lowest_equity": 98412.83,
-  "macro_z": 1.044,
-  "fast_z": 0.307,
-  "atr": 6.85,
-  "regime": "H1 BULL | CHOP: 44.3 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
+  "macro_z": 0.528,
+  "fast_z": -1.234,
+  "atr": 6.28,
+  "regime": "H1 BULL | CHOP: 53.192 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
   "signal": {
     "type": "WAIT",
     "agent": "SCANNING (V23.3 FTMO-SCALED DUAL-BRAIN)",
@@ -16344,59 +16344,18 @@
       {
         "time": 1794933,
         "value": 126839.79
+      },
+      {
+        "time": 1794937,
+        "value": 126839.79
+      },
+      {
+        "time": 1794941,
+        "value": 126839.79
       }
     ]
   },
   "candles": [
-    {
-      "time": 1794464,
-      "open": 3986.11,
-      "high": 3988.38,
-      "low": 3982.17,
-      "close": 3986.04
-    },
-    {
-      "time": 1794465,
-      "open": 3986.61,
-      "high": 3990.9,
-      "low": 3986.61,
-      "close": 3987.11
-    },
-    {
-      "time": 1794466,
-      "open": 3986.93,
-      "high": 3987.33,
-      "low": 3982.95,
-      "close": 3986.88
-    },
-    {
-      "time": 1794467,
-      "open": 3986.76,
-      "high": 3988.35,
-      "low": 3983.75,
-      "close": 3987.38
-    },
-    {
-      "time": 1794468,
-      "open": 3987.94,
-      "high": 3987.94,
-      "low": 3984.22,
-      "close": 3986.62
-    },
-    {
-      "time": 1794469,
-      "open": 3986.05,
-      "high": 3989.05,
-      "low": 3985.33,
-      "close": 3985.5
-    },
-    {
-      "time": 1794470,
-      "open": 3985.82,
-      "high": 3986.58,
-      "low": 3982.7,
-      "close": 3986.04
-    },
     {
       "time": 1794471,
       "open": 3985.63,
@@ -18447,6 +18406,55 @@
       "high": 3877.15,
       "low": 3873.37,
       "close": 3875.0
+    },
+    {
+      "time": 1794937,
+      "open": 3874.16,
+      "high": 3874.32,
+      "low": 3870.56,
+      "close": 3871.78
+    },
+    {
+      "time": 1794938,
+      "open": 3871.86,
+      "high": 3879.26,
+      "low": 3871.15,
+      "close": 3877.59
+    },
+    {
+      "time": 1794939,
+      "open": 3876.94,
+      "high": 3878.22,
+      "low": 3875.37,
+      "close": 3875.58
+    },
+    {
+      "time": 1794940,
+      "open": 3875.93,
+      "high": 3877.17,
+      "low": 3872.34,
+      "close": 3872.66
+    },
+    {
+      "time": 1794941,
+      "open": 3873.12,
+      "high": 3873.96,
+      "low": 3870.93,
+      "close": 3871.59
+    },
+    {
+      "time": 1794942,
+      "open": 3865.49,
+      "high": 3868.82,
+      "low": 3861.95,
+      "close": 3868.15
+    },
+    {
+      "time": 1794943,
+      "open": 3866.81,
+      "high": 3869.52,
+      "low": 3866.24,
+      "close": 3866.4
     }
   ]
 }

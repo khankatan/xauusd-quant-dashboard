@@ -295,18 +295,9 @@ def run_modular_engine():
     atr_now = float(curr["atr"]) if not pd.isna(curr["atr"]) else 1.0
     move_open_now = abs(entry_now - day_open) / atr_now if (day_open is not None and atr_now > 0) else 0.0
 
-    # เช็กอายุแท่งเทียน curr ป้องกันการดึงแท่งเก่าค้างข้ามวันมายิงสัญญาณผีช่วงตลาดปิด/เปิด 06:30 น.
-    now_utc = datetime.now(timezone.utc)
-    if curr_dt.tzinfo is None:
-        curr_dt_utc = curr_dt.replace(tzinfo=timezone.utc)
-    else:
-        curr_dt_utc = curr_dt
-    bar_age_mins = (now_utc - curr_dt_utc).total_seconds() / 60.0
-    is_fresh_bar = (bar_age_mins <= 35.0)
-
-    # ยึดสถานะ pos จากลูป Backtest 100% ห้ามคำนวณ sig_now แยกต่างหากเพื่อป้องกันการยิงออเดอร์ซ้ำ
+    # ยึดผลลัพธ์จากตัวแปร pos ในลูป Backtest 100% (ตรงกับ all_trades.csv ทุกไม้ ไม่คำนวณซ้ำซ้อน)
     if pos is not None:
-        is_fresh_entry = (pos["entry_time"] == int(curr["ts"])) and is_fresh_bar
+        is_fresh_entry = (pos["entry_time"] == int(curr["ts"]))
         if is_fresh_entry:
             sig_payload = {
                 "type": pos["type"],
@@ -350,7 +341,7 @@ def run_modular_engine():
         return 0.0 if (val is None or (isinstance(val, float) and math.isnan(val))) else round(float(val), 3)
 
     h1_txt = "H1 BULL" if curr["h1_close"] >= curr["h1_ema"] else "H1 BEAR"
-    dst_txt = "US-SUMMER (Close 03:00 TH)" if is_us_dst_active(curr_dt_utc) else "US-WINTER (Close 03:00 TH)"
+    dst_txt = "US-SUMMER (Close 03:00 TH)" if is_us_dst_active(curr_dt) else "US-WINTER (Close 03:00 TH)"
     macro_txt = str(curr["macro_status"]) if "macro_status" in curr else "OI+DXY: STANDARD"
     regime_label = f"{h1_txt} | CHOP: {clean_num(curr.get('chop', 50.0))} | {macro_txt} | {dst_txt}"
 

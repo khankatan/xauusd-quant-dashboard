@@ -1,18 +1,18 @@
 {
-  "updated_utc": "2026-11-22 07:36:54 UTC",
+  "updated_utc": "2026-11-22 15:41:26 UTC",
   "data_source": "TwelveData Spot XAU/USD (1-Year Deep History) + COMEX GC=F OI & DXY (V23.3 FTMO-Scaled Dual-Brain)",
-  "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-20 (189 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
-  "current_price": 3570.16,
+  "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-23 (190 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
+  "current_price": 3538.2,
   "equity": 125989.33,
   "lowest_equity": 98412.83,
-  "macro_z": -0.809,
-  "fast_z": -0.493,
-  "atr": 11.74,
-  "regime": "H1 BEAR | CHOP: 42.639 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
+  "macro_z": -1.085,
+  "fast_z": -1.021,
+  "atr": 7.37,
+  "regime": "H1 BEAR | CHOP: 35.558 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
   "signal": {
     "type": "WAIT",
     "agent": "SCANNING (V23.3 FTMO-SCALED DUAL-BRAIN)",
-    "risk_pct": 0.325,
+    "risk_pct": 0.65,
     "entry": null,
     "sl": null,
     "tp1": null,
@@ -23,14 +23,14 @@
   "backtest": {
     "net_pnl": 25989.33,
     "net_pnl_pct": 25.99,
-    "avg_daily_pct": 0.138,
+    "avg_daily_pct": 0.137,
     "max_overall_dd_pct": 1.59,
     "max_overall_dd_cash": 1587.17,
     "max_daily_dd_pct": 0.8,
     "max_daily_dd_cash": 820.05,
     "worst_dd_date": "2026-04-10",
     "total_trades": 185,
-    "total_bdays": 189,
+    "total_bdays": 190,
     "win_rate": 62.16,
     "profit_factor": 1.86,
     "days_hit_target": 65,
@@ -16628,80 +16628,18 @@
       {
         "time": 1795217,
         "value": 125989.33
+      },
+      {
+        "time": 1795394,
+        "value": 125989.33
+      },
+      {
+        "time": 1795398,
+        "value": 125989.33
       }
     ]
   },
   "candles": [
-    {
-      "time": 1794919,
-      "open": 3868.99,
-      "high": 3871.78,
-      "low": 3859.81,
-      "close": 3865.4
-    },
-    {
-      "time": 1794920,
-      "open": 3863.58,
-      "high": 3869.22,
-      "low": 3862.57,
-      "close": 3869.05
-    },
-    {
-      "time": 1794921,
-      "open": 3868.69,
-      "high": 3872.37,
-      "low": 3864.84,
-      "close": 3867.3
-    },
-    {
-      "time": 1794922,
-      "open": 3866.7,
-      "high": 3868.88,
-      "low": 3862.64,
-      "close": 3866.05
-    },
-    {
-      "time": 1794923,
-      "open": 3865.36,
-      "high": 3869.71,
-      "low": 3862.2,
-      "close": 3868.37
-    },
-    {
-      "time": 1794924,
-      "open": 3872.17,
-      "high": 3879.88,
-      "low": 3870.78,
-      "close": 3876.15
-    },
-    {
-      "time": 1794925,
-      "open": 3875.85,
-      "high": 3875.85,
-      "low": 3871.97,
-      "close": 3873.43
-    },
-    {
-      "time": 1794926,
-      "open": 3873.19,
-      "high": 3873.94,
-      "low": 3870.27,
-      "close": 3870.36
-    },
-    {
-      "time": 1794927,
-      "open": 3870.52,
-      "high": 3871.62,
-      "low": 3868.17,
-      "close": 3870.38
-    },
-    {
-      "time": 1794928,
-      "open": 3870.12,
-      "high": 3870.91,
-      "low": 3864.73,
-      "close": 3865.01
-    },
     {
       "time": 1794929,
       "open": 3865.57,
@@ -18731,6 +18669,76 @@
       "high": 3575.26,
       "low": 3566.26,
       "close": 3570.16
+    },
+    {
+      "time": 1795392,
+      "open": 3537.29,
+      "high": 3537.45,
+      "low": 3537.23,
+      "close": 3537.35
+    },
+    {
+      "time": 1795393,
+      "open": 3537.29,
+      "high": 3537.44,
+      "low": 3537.23,
+      "close": 3537.37
+    },
+    {
+      "time": 1795394,
+      "open": 3537.29,
+      "high": 3537.45,
+      "low": 3537.23,
+      "close": 3537.32
+    },
+    {
+      "time": 1795395,
+      "open": 3537.29,
+      "high": 3537.44,
+      "low": 3537.24,
+      "close": 3537.26
+    },
+    {
+      "time": 1795396,
+      "open": 3537.29,
+      "high": 3538.32,
+      "low": 3537.23,
+      "close": 3538.22
+    },
+    {
+      "time": 1795397,
+      "open": 3538.16,
+      "high": 3538.32,
+      "low": 3538.11,
+      "close": 3538.23
+    },
+    {
+      "time": 1795398,
+      "open": 3538.16,
+      "high": 3538.32,
+      "low": 3538.11,
+      "close": 3538.16
+    },
+    {
+      "time": 1795399,
+      "open": 3538.16,
+      "high": 3538.32,
+      "low": 3538.11,
+      "close": 3538.14
+    },
+    {
+      "time": 1795400,
+      "open": 3538.16,
+      "high": 3538.32,
+      "low": 3538.11,
+      "close": 3538.21
+    },
+    {
+      "time": 1795401,
+      "open": 3538.16,
+      "high": 3538.32,
+      "low": 3538.11,
+      "close": 3538.2
     }
   ]
 }

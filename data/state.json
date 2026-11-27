@@ -1,14 +1,14 @@
 {
-  "updated_utc": "2026-11-27 11:32:12 UTC",
+  "updated_utc": "2026-11-27 20:18:51 UTC",
   "data_source": "TwelveData Spot XAU/USD (1-Year Deep History) + COMEX GC=F OI & DXY (V23.3 FTMO-Scaled Dual-Brain)",
   "history_range": "2026-02-27 \u0e16\u0e36\u0e07 2026-11-27 (194 \u0e27\u0e31\u0e19\u0e17\u0e33\u0e01\u0e32\u0e23)",
-  "current_price": 3678.5,
+  "current_price": 3668.83,
   "equity": 126379.43,
   "lowest_equity": 98412.83,
-  "macro_z": 1.874,
-  "fast_z": 0.843,
-  "atr": 7.59,
-  "regime": "H1 BULL | CHOP: 40.234 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
+  "macro_z": 1.443,
+  "fast_z": -0.599,
+  "atr": 7.12,
+  "regime": "H1 BULL | CHOP: 47.224 | OI+DXY+POC: STANDARD (0.35%) | US-WINTER (Close 03:00 TH)",
   "signal": {
     "type": "WAIT",
     "agent": "SCANNING (V23.3 FTMO-SCALED DUAL-BRAIN)",
@@ -17052,45 +17052,18 @@
       {
         "time": 1795814,
         "value": 126379.43
+      },
+      {
+        "time": 1795818,
+        "value": 126379.43
+      },
+      {
+        "time": 1795822,
+        "value": 126379.43
       }
     ]
   },
   "candles": [
-    {
-      "time": 1795519,
-      "open": 3644.51,
-      "high": 3660.72,
-      "low": 3641.07,
-      "close": 3659.12
-    },
-    {
-      "time": 1795520,
-      "open": 3658.86,
-      "high": 3668.67,
-      "low": 3652.62,
-      "close": 3666.23
-    },
-    {
-      "time": 1795521,
-      "open": 3666.86,
-      "high": 3671.7,
-      "low": 3654.7,
-      "close": 3663.65
-    },
-    {
-      "time": 1795522,
-      "open": 3662.34,
-      "high": 3670.83,
-      "low": 3657.78,
-      "close": 3665.34
-    },
-    {
-      "time": 1795523,
-      "open": 3665.68,
-      "high": 3677.15,
-      "low": 3662.4,
-      "close": 3675.0
-    },
     {
       "time": 1795524,
       "open": 3674.86,
@@ -19155,6 +19128,41 @@
       "high": 3678.63,
       "low": 3677.25,
       "close": 3678.5
+    },
+    {
+      "time": 1795819,
+      "open": 3674.1,
+      "high": 3674.1,
+      "low": 3667.44,
+      "close": 3673.28
+    },
+    {
+      "time": 1795820,
+      "open": 3671.63,
+      "high": 3674.71,
+      "low": 3668.11,
+      "close": 3670.75
+    },
+    {
+      "time": 1795821,
+      "open": 3671.1,
+      "high": 3675.64,
+      "low": 3667.71,
+      "close": 3670.13
+    },
+    {
+      "time": 1795822,
+      "open": 3669.85,
+      "high": 3671.48,
+      "low": 3668.13,
+      "close": 3668.49
+    },
+    {
+      "time": 1795823,
+      "open": 3669.17,
+      "high": 3670.38,
+      "low": 3663.74,
+      "close": 3668.83
     }
   ]
 }
